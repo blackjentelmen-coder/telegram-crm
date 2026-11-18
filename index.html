@@ -14,12 +14,22 @@
         .btn-success { background: #10b981; color: white; border: none; padding: 10px; width: 100%; border-radius: 6px; cursor: pointer; font-weight: bold; margin-top: 10px; }
         input, select, textarea { width: 100%; padding: 10px; margin: 8px 0; background: #0f172a; border: 1px solid #334155; color: white; border-radius: 6px; box-sizing: border-box; font-size: 14px; }
         h3 { margin-top: 0; font-size: 16px; color: #38bdf8; }
-        .account-item { background: #0f172a; padding: 10px; border-radius: 6px; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center; font-size: 14px; }
+        .tool-settings { display: none; margin-top: 10px; border-top: 1px solid #334155; padding-top: 10px; }
+        .active-tool { display: block; }
+        label { font-size: 12px; color: #94a3b8; display: block; margin-top: 5px; }
     </style>
+    <script>
+        function switchTool() {
+            var selected = document.getElementById("task_type").value;
+            document.getElementById("settings-spammer").style.display = (selected === "spammer") ? "block" : "none";
+            document.getElementById("settings-inviter").style.display = (selected === "inviter") ? "block" : "none";
+            document.getElementById("settings-parser").style.display = (selected === "parser") ? "block" : "none";
+        }
+    </script>
 </head>
 <body>
     <div class="container">
-        <!-- Шапка с инфо о клиенте -->
+        <!-- Шапка -->
         <div class="card header">
             <div>
                 <div style="font-size: 13px; color: #94a3b8;">Клиент</div>
@@ -28,7 +38,7 @@
             <a href="/logout-client" style="text-decoration: none;"><button class="btn-danger">Выйти</button></a>
         </div>
 
-        <!-- Управление аккаунтами -->
+        <!-- Аккаунты -->
         <div class="card">
             <h3>Telegram Аккаунты</h3>
             <form action="/cabinet/add-account" method="POST">
@@ -39,28 +49,58 @@
             <a href="/cabinet/start-qr"><button class="btn-primary" style="background: #8b5cf6; margin-top:0;">Вход по QR-коду</button></a>
         </div>
 
-        <!-- Панель задач (Инвайтер, Спамер, Парсер) -->
+        <!-- Панель задач с переключением настроек -->
         <div class="card">
             <h3>Запуск задач</h3>
             <form action="/cabinet/run-task" method="POST">
-                <label style="font-size: 12px; color: #94a3b8;">Выберите инструмент:</label>
-                <select name="task_type">
-                    <option value="Парсер">🔍 Парсер (сбор чата / проверка)</option>
-                    <option value="Инвайтер">👥 Инвайтер (добавление в чат)</option>
-                    <option value="Спамер / Рассылка">🚀 Спамер / Рассылка (отправка сообщений)</option>
+                <label>Выберите инструмент:</label>
+                <select name="task_type" id="task_type" onchange="switchTool()">
+                    <option value="spammer">🚀 Спамер / Рассылка</option>
+                    <option value="inviter">👥 Инвайтер (добавление)</option>
+                    <option value="parser">🔍 Парсер (сбор базы)</option>
                 </select>
 
-                <label style="font-size: 12px; color: #94a3b8; margin-top: 8px; display: block;">Цель (ссылка / чат / текст):</label>
-                <textarea name="target_link" rows="3" placeholder="https://t.me/... или текст для рассылки" required></textarea>
+                <!-- Настройки для Спамера -->
+                <div id="settings-spammer" class="tool-settings active-tool">
+                    <label>Текст сообщения:</label>
+                    <textarea name="spam_text" rows="3" placeholder="Введите текст для рассылки..."></textarea>
+                    <label>Задержка между сообщениями (сек):</label>
+                    <input type="number" name="spam_delay" value="5" min="1">
+                    <label>Лимит сообщений с одного акка:</label>
+                    <input type="number" name="spam_limit" value="20" min="1">
+                </div>
 
-                <button type="submit" class="btn-primary">Запустить задачу</button>
+                <!-- Настройки для Инвайтера -->
+                <div id="settings-inviter" class="tool-settings" style="display:none;">
+                    <label>Ссылка на чат-донор (откуда брать людей):</label>
+                    <input type="text" name="inviter_source" placeholder="https://t.me/donor_chat">
+                    <label>Ссылка на ваш целевой чат:</label>
+                    <input type="text" name="inviter_target" placeholder="https://t.me/your_chat">
+                    <label>Количество инвайтов за раз:</label>
+                    <input type="number" name="inviter_limit" value="10" min="1">
+                    <label>Задержка (сек):</label>
+                    <input type="number" name="inviter_delay" value="10" min="1">
+                </div>
+
+                <!-- Настройки для Парсера -->
+                <div id="settings-parser" class="tool-settings" style="display:none;">
+                    <label>Ссылка на чат для парсинга:</label>
+                    <input type="text" name="parser_target" placeholder="https://t.me/target_chat">
+                    <label>Что собирать:</label>
+                    <select name="parser_mode">
+                        <option value="members">Участников чата</option>
+                        <option value="messages">Сообщения / активных юзеров</option>
+                    </select>
+                </div>
+
+                <button type="submit" class="btn-primary">Запустить задачу в работу</button>
             </form>
         </div>
 
-        <!-- История / Результаты -->
+        <!-- История -->
         <div class="card">
             <h3>История задач</h3>
-            <p style="color: #64748b; font-size: 13px; margin: 0;">Здесь будут отображаться результаты выполнения твоих задач.</p>
+            <p style="color: #64748b; font-size: 13px; margin: 0;">Здесь будут отображаться статусы выполнения.</p>
         </div>
     </div>
 </body>
