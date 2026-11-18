@@ -1,18 +1,16 @@
 import sqlite3
 import secrets
 from datetime import datetime
-from fastapi import FastAPI, Form, Request, Response, HTTPException
+from fastapi import FastAPI, Form, Request, Response
 from fastapi.responses import HTMLResponse, RedirectResponse
 
-app = FastAPI(title="Telegram CRM", version="2.0")
+app = FastAPI(title="Telegram CRM", version="2.1")
 
 DB_FILE = "crm.db"
 
-# Инициализация базы данных
 def init_db():
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
-    # Таблица ключей доступа пользователей
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS access_keys (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -22,18 +20,15 @@ def init_db():
             activated_at TEXT
         )
     """)
-    # Таблица настроек (админ-пароль)
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS admin_config (
             key TEXT PRIMARY KEY,
             value TEXT
         )
     """)
-    # Установка дефолтного пароля админа, если его нет (по умолчанию: admin123)
     cursor.execute("SELECT value FROM admin_config WHERE key='admin_pass'")
     if not cursor.fetchone():
         cursor.execute("INSERT INTO admin_config (key, value) VALUES ('admin_pass', 'admin123')")
-    
     conn.commit()
     conn.close()
 
@@ -44,19 +39,16 @@ def get_db():
     conn.row_factory = sqlite3.Row
     return conn
 
-# Генерация уникальных ключей
 def generate_keys_batch(count=20):
     conn = get_db()
     cursor = conn.cursor()
-    alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789" # Исключены похожие символы (O, 0, I, 1)
-    
+    alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
     for _ in range(count):
         while True:
             p1 = "".join(secrets.choice(alphabet) for _ in range(4))
             p2 = "".join(secrets.choice(alphabet) for _ in range(4))
             p3 = "".join(secrets.choice(alphabet) for _ in range(4))
             key_code = f"CRM-{p1}-{p2}-{p3}"
-            
             cursor.execute("SELECT id FROM access_keys WHERE key_code = ?", (key_code,))
             if not cursor.fetchone():
                 cursor.execute(
@@ -67,7 +59,6 @@ def generate_keys_batch(count=20):
     conn.commit()
     conn.close()
 
-# --- СТИЛИ ДИЗАЙНА (Cyberpunk Dark UI) ---
 BASE_STYLE = """
 <style>
     :root {
@@ -113,10 +104,7 @@ BASE_STYLE = """
         font-size: 16px;
         box-sizing: border-box;
     }
-    input:focus {
-        border-color: var(--accent);
-        outline: none;
-    }
+    input:focus { border-color: var(--accent); outline: none; }
     button {
         background: var(--accent);
         color: #0b0f19;
@@ -128,7 +116,6 @@ BASE_STYLE = """
     button:hover { background: var(--accent-hover); }
     .btn-danger { background: var(--danger); color: white; }
     .error { color: var(--danger); font-size: 14px; margin-bottom: 10px; }
-    .success { color: var(--accent); font-size: 14px; margin-bottom: 10px; }
     table { width: 100%; border-collapse: collapse; margin-top: 15px; font-size: 14px; }
     th, td { padding: 10px; border-bottom: 1px solid var(--border); text-align: left; }
     th { color: var(--text-muted); }
@@ -139,89 +126,7 @@ BASE_STYLE = """
 </style>
 """
 
-# --- 1. КЛИЕНТСКИЙ ВХОД ( / ) ---
-@app.get("/", response_class=HTMLResponse)
-def user_login_page(error: str = None):
-    err_html = f'<div class="error">{error}</div>' if error else ''
-    return f"""
-    <!DOCTYPE html>
-    <html lang="ru">
-    <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Telegram CRM - Вход</title>{BASE_STYLE}</head>
-    <body>
-        <div class="container">
-            <h2>Telegram CRM</h2>
-            <p style="color: var(--text-muted);">Введите ваш персональный ключ доступа для входа в систему.</p>
-            {err_html}
-            <form action="/auth" method="POST">
-                <input type="text" name="key_code" placeholder="CRM-XXXX-XXXX-XXXX" required autocomplete="off">
-                <button type="submit">Войти в систему</button>
-            </form>
-            <div style="margin-top: 20px; text-align: center;">
-                <a href="/admin/login" class="back-link">🔑 Вход в панель администратора</a>
-            </div>
-        </div>
-    </body>
-    </html>
-    """
-
-@app.post("/auth")
-def user_authenticate(key_code: str = Form(...)):
-    conn = get_db()
-    cursor = conn.cursor()
-    code = key_code.strip()
-    
-    cursor.execute("SELECT * FROM access_keys WHERE key_code = ?", (code,))
-    row = cursor.fetchone()
-    
-    if not row:
-        conn.close()
-        return RedirectResponse(url="/?error=Неверный ключ доступа", status_code=303)
-    
-    # Если ключ свободен, активируем его
-    if row["status"] == "free":
-        cursor.execute(
-            "UPDATE access_keys SET status = 'active', activated_at = ? WHERE key_code = ?",
-            (datetime.now().strftime("%Y-%m-%d %H:%M:%S"), code)
-        )
-        conn.commit()
-    
-    conn.close()
-    
-    response = RedirectResponse(url="/dashboard", status_code=303)
-    response.set_cookie(key="user_key", value=code)
-    return response
-
-@app.get("/dashboard", response_class=HTMLResponse)
-def user_dashboard(request: Request):
-    user_key = request.cookies.get("user_key")
-    if not user_key:
-        return RedirectResponse(url="/", status_code=303)
-    
-    return f"""
-    <!DOCTYPE html>
-    <html lang="ru">
-    <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>CRM Dashboard</title>{BASE_STYLE}</head>
-    <body>
-        <div class="container">
-            <h2>🚀 Рабочий кабинет CRM</h2>
-            <p style="color: var(--text-muted);">Авторизованный ключ: <strong>{user_key}</strong></p>
-            <hr style="border: 0; border-top: 1px solid var(--border); margin: 20px 0;">
-            <p>Здесь находится твой функционал управления аккаунтами, задачами и рассылками.</p>
-            <a href="/logout"><button class="btn-danger">Выйти из системы</button></a>
-        </div>
-    </body>
-    </html>
-    """
-
-@app.get("/logout")
-def logout():
-    response = RedirectResponse(url="/", status_code=303)
-    response.delete_cookie("user_key")
-    response.delete_cookie("admin_session")
-    return response
-
-
-# --- 2. АДМИН-ПАНЕЛЬ ( /admin ) ---
+# --- 1. АДМИН-ПАНЕЛЬ (ВЫШЕ КЛИЕНТСКИХ МАРШРУТОВ) ---
 @app.get("/admin/login", response_class=HTMLResponse)
 def admin_login_page(error: str = None):
     err_html = f'<div class="error">{error}</div>' if error else ''
@@ -336,3 +241,84 @@ def admin_delete_key(request: Request, key_id: int = Form(...)):
     conn.commit()
     conn.close()
     return RedirectResponse(url="/admin", status_code=303)
+
+
+# --- 2. КЛИЕНТСКИЙ ВХОД И ОБЩИЕ МАРШРУТЫ ---
+@app.get("/", response_class=HTMLResponse)
+def user_login_page(error: str = None):
+    err_html = f'<div class="error">{error}</div>' if error else ''
+    return f"""
+    <!DOCTYPE html>
+    <html lang="ru">
+    <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Telegram CRM - Вход</title>{BASE_STYLE}</head>
+    <body>
+        <div class="container">
+            <h2>Telegram CRM</h2>
+            <p style="color: var(--text-muted);">Введите ваш персональный ключ доступа для входа в систему.</p>
+            {err_html}
+            <form action="/auth" method="POST">
+                <input type="text" name="key_code" placeholder="CRM-XXXX-XXXX-XXXX" required autocomplete="off">
+                <button type="submit">Войти в систему</button>
+            </form>
+            <div style="margin-top: 20px; text-align: center;">
+                <a href="/admin/login" class="back-link">🔑 Вход в панель администратора</a>
+            </div>
+        </div>
+    </body>
+    </html>
+    """
+
+@app.post("/auth")
+def user_authenticate(key_code: str = Form(...)):
+    conn = get_db()
+    cursor = conn.cursor()
+    code = key_code.strip()
+    
+    cursor.execute("SELECT * FROM access_keys WHERE key_code = ?", (code,))
+    row = cursor.fetchone()
+    
+    if not row:
+        conn.close()
+        return RedirectResponse(url="/?error=Неверный ключ доступа", status_code=303)
+    
+    if row["status"] == "free":
+        cursor.execute(
+            "UPDATE access_keys SET status = 'active', activated_at = ? WHERE key_code = ?",
+            (datetime.now().strftime("%Y-%m-%d %H:%M:%S"), code)
+        )
+        conn.commit()
+    
+    conn.close()
+    
+    response = RedirectResponse(url="/dashboard", status_code=303)
+    response.set_cookie(key="user_key", value=code)
+    return response
+
+@app.get("/dashboard", response_class=HTMLResponse)
+def user_dashboard(request: Request):
+    user_key = request.cookies.get("user_key")
+    if not user_key:
+        return RedirectResponse(url="/", status_code=303)
+    
+    return f"""
+    <!DOCTYPE html>
+    <html lang="ru">
+    <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>CRM Dashboard</title>{BASE_STYLE}</head>
+    <body>
+        <div class="container">
+            <h2>🚀 Рабочий кабинет CRM</h2>
+            <p style="color: var(--text-muted);">Авторизованный ключ: <strong>{user_key}</strong></p>
+            <hr style="border: 0; border-top: 1px solid var(--border); margin: 20px 0;">
+            <p>Здесь находится твой функционал управления аккаунтами, задачами и рассылками.</p>
+            <a href="/logout"><button class="btn-danger">Выйти из системы</button></a>
+        </div>
+    </body>
+    </html>
+    """
+
+@app.get("/logout")
+def logout():
+    response = RedirectResponse(url="/", status_code=303)
+    response.delete_cookie("user_key")
+    response.delete_cookie("admin_session")
+    return response
