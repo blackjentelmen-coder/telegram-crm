@@ -1,9 +1,15 @@
 import os
+import asyncio
 from fastapi import FastAPI, Form, Request, Response
 from fastapi.responses import HTMLResponse, RedirectResponse
 from database import init_db, get_db
 import admin
 import uuid
+from telethon import TelegramClient
+from telethon.sessions import StringSession
+
+API_ID = 38977487
+API_HASH = "a6afb062a4c36f6d7b2cb87d27385672"
 
 app = FastAPI()
 
@@ -102,11 +108,9 @@ def client_cabinet(request: Request, message: str = None):
     cursor.execute("SELECT * FROM access_keys WHERE key_code = ?", (client_key,))
     key_row = cursor.fetchone()
     
-    # Получаем аккаунты этого конкретного клиента
     cursor.execute("SELECT * FROM client_tg_accounts WHERE client_key = ? ORDER BY id DESC", (client_key,))
     my_accounts = cursor.fetchall()
     
-    # История задач
     cursor.execute("SELECT * FROM client_tasks WHERE client_key = ? ORDER BY id DESC LIMIT 5", (client_key,))
     tasks = cursor.fetchall()
     db.close()
@@ -116,16 +120,32 @@ def client_cabinet(request: Request, message: str = None):
         
     client_name = key_row["client_name"] or "Гость"
     
-    # Рендерим аккаунты клиента
     accounts_html = ""
     for acc in my_accounts:
-        accounts_html += f"""
-        <div style="display: flex; justify-content: space-between; align-items: center; background: #0f172a; padding: 10px; border-radius: 4px; margin-bottom: 8px; font-size: 14px;">
-            <div><b>{acc["phone"]}</b> <span style="color: #4ade80; margin-left: 10px; font-size: 12px;">[{acc["status"]}]</span></div>
-            <form action="/cabinet/delete-account" method="POST" style="margin:0;">
+        status_color = "#4ade80" if acc["status"] == "Активен" else "#f87171"
+        
+        # Если аккаунт ожидает код SMS, выводим форму для ввода кода
+        if acc["status"] == "Ожидает код":
+            action_form = f"""
+            <form action="/cabinet/verify-code" method="POST" style="display: flex; gap: 5px; margin-top: 5px;">
                 <input type="hidden" name="acc_id" value="{acc["id"]}">
-                <button type="submit" style="padding: 4px 8px; font-size: 11px; background: #ef4444;">Удалить</button>
+                <input type="text" name="code" placeholder="Код из ТГ..." required style="padding: 5px; width: 100px; margin: 0; background: #0f172a; border: 1px solid #334155; color: white; border-radius: 4px; font-size: 12px;">
+                <button type="submit" style="padding: 5px 10px; font-size: 12px; background: #10b981;">Подтвердить</button>
             </form>
+            """
+        else:
+            action_form = ""
+
+        accounts_html += f"""
+        <div style="background: #0f172a; padding: 12px; border-radius: 6px; margin-bottom: 10px; font-size: 14px;">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+                <div><b>{acc["phone"]}</b> <span style="color: {status_color}; margin-left: 10px; font-size: 12px;">[{acc["status"]}]</span></div>
+                <form action="/cabinet/delete-account" method="POST" style="margin:0;">
+                    <input type="hidden" name="acc_id" value="{acc["id"]}">
+                    <button type="submit" style="padding: 4px 8px; font-size: 11px; background: #ef4444;">Удалить</button>
+                </form>
+            </div>
+            {action_form}
         </div>
         """
         
@@ -159,7 +179,6 @@ def client_cabinet(request: Request, message: str = None):
     </head>
     <body>
         <div class="wrapper">
-            <!-- Шапка кабинета -->
             <div class="card" style="display: flex; justify-content: space-between; align-items: center;">
                 <div>
                     <h3 style="margin: 0 0 5px 0;">Клиент: {client_name}</h3>
@@ -170,10 +189,9 @@ def client_cabinet(request: Request, message: str = None):
 
             {msg_div}
 
-            <!-- Управление аккаунтами -->
             <div class="card">
                 <h3 style="margin-top:0;">Мои Telegram-аккаунты</h3>
-                <p style="font-size: 13px; color: #94a3b8;">Добавьте аккаунты для работы парсера, инвайтера и рассылок.</p>
+                <p style="font-size: 13px; color: #94a3b8;">Добавьте номер телефона, чтобы запросить код авторизации от Telegram.</p>
                 
                 <div style="margin-bottom: 15px;">
                     {accounts_html if accounts_html else '<p style="color: #64748b; font-size: 13px;">У вас пока нет добавленных аккаунтов.</p>'}
@@ -181,11 +199,10 @@ def client_cabinet(request: Request, message: str = None):
 
                 <form action="/cabinet/add-account" method="POST" style="display: flex; gap: 10px;">
                     <input type="text" name="phone" placeholder="Номер телефона (+380...)" required style="margin:0; flex-grow:1;">
-                    <button type="submit" style="background: #10b981;">Добавить аккаунт</button>
+                    <button type="submit" style="background: #10b981;">Запросить код</button>
                 </form>
             </div>
 
-            <!-- Запуск инструментов (Парсер / Инвайтер / Рассылки) -->
             <div class="card">
                 <h3 style="margin-top:0;">Панель инструментов</h3>
                 <form action="/cabinet/run-task" method="POST">
@@ -203,7 +220,6 @@ def client_cabinet(request: Request, message: str = None):
                 </form>
             </div>
 
-            <!-- История -->
             <div class="card">
                 <h3 style="margin-top:0;">История задач</h3>
                 {tasks_html if tasks_html else '<p style="color: #64748b; font-size: 13px;">История пока пуста.</p>'}
@@ -214,23 +230,77 @@ def client_cabinet(request: Request, message: str = None):
     """
 
 @app.post("/cabinet/add-account")
-def add_client_account(request: Request, phone: str = Form(...)):
+async def add_client_account(request: Request, phone: str = Form(...)):
+    client_key = request.cookies.get("client_session")
+    if not client_key:
+        return RedirectResponse(url="/", status_code=303)
+        
+    clean_phone = phone.strip()
+    
+    # Инициализируем клиент Telethon с пустой StringSession для запроса кода
+    client = TelegramClient(StringSession(), API_ID, API_HASH)
+    await client.connect()
+    
+    try:
+        sent = await client.send_code_request(clean_phone)
+        phone_code_hash = sent.phone_code_hash
+        # Получаем StringSession в разобранном виде для сохранения сеанса ожидания
+        session_str = client.session.save()
+        await client.disconnect()
+        
+        db = get_db()
+        cursor = db.cursor()
+        cursor.execute(
+            "INSERT INTO client_tg_accounts (client_key, phone, session_string, phone_code_hash, status) VALUES (?, ?, ?, ?, 'Ожидает код')",
+            (client_key, clean_phone, session_str, phone_code_hash)
+        )
+        db.commit()
+        db.close()
+        
+        return RedirectResponse(url="/cabinet?message=Код отправлен в официальный Telegram-аккаунт номера!", status_code=303)
+    except Exception as e:
+        await client.disconnect()
+        return RedirectResponse(url=f"/cabinet?message=Ошибка запроса кода: {str(e)}", status_code=303)
+
+@app.post("/cabinet/verify-code")
+async def verify_client_code(request: Request, acc_id: int = Form(...), code: str = Form(...)):
     client_key = request.cookies.get("client_session")
     if not client_key:
         return RedirectResponse(url="/", status_code=303)
         
     db = get_db()
     cursor = db.cursor()
-    session_name = f"sess_{uuid.uuid4().hex[:6]}"
-    
-    cursor.execute(
-        "INSERT INTO client_tg_accounts (client_key, phone, session_name, status) VALUES (?, ?, ?, 'Ожидает код SMS')",
-        (client_key, phone.strip(), session_name)
-    )
-    db.commit()
+    cursor.execute("SELECT * FROM client_tg_accounts WHERE id = ? AND client_key = ?", (acc_id, client_key))
+    acc = cursor.fetchone()
     db.close()
     
-    return RedirectResponse(url="/cabinet?message=Аккаунт добавлен. Скоро здесь появится запрос SMS-кода авторизации.", status_code=303)
+    if not acc:
+        return RedirectResponse(url="/cabinet?message=Аккаунт не найден", status_code=303)
+        
+    client = TelegramClient(StringSession(acc["session_string"]), API_ID, API_HASH)
+    await client.connect()
+    
+    try:
+        # Пробуем авторизоваться по коду
+        await client.sign_in(phone=acc["phone"], code=code.strip(), phone_code_hash=acc["phone_code_hash"])
+        
+        # Сохраняем готовую авторизованную строку сессии
+        final_session_str = client.session.save()
+        await client.disconnect()
+        
+        db = get_db()
+        cursor = db.cursor()
+        cursor.execute(
+            "UPDATE client_tg_accounts SET session_string = ?, status = 'Активен' WHERE id = ?",
+            (final_session_str, acc_id)
+        )
+        db.commit()
+        db.close()
+        
+        return RedirectResponse(url="/cabinet?message=Аккаунт успешно авторизован и готов к работе!", status_code=303)
+    except Exception as e:
+        await client.disconnect()
+        return RedirectResponse(url=f"/cabinet?message=Ошибка авторизации: {str(e)}", status_code=303)
 
 @app.post("/cabinet/delete-account")
 def delete_client_account(request: Request, acc_id: int = Form(...)):
@@ -244,7 +314,7 @@ def delete_client_account(request: Request, acc_id: int = Form(...)):
     db.commit()
     db.close()
     
-    return RedirectResponse(url="/cabinet?message=Аккаунт успешно удален", status_code=303)
+    return RedirectResponse(url="/cabinet?message=Аккаунт удален", status_code=303)
 
 @app.post("/cabinet/run-task")
 def run_client_task(request: Request, task_type: str = Form(...), target_link: str = Form(...)):
@@ -254,15 +324,13 @@ def run_client_task(request: Request, task_type: str = Form(...), target_link: s
         
     db = get_db()
     cursor = db.cursor()
+    cursor.execute("SELECT * FROM client_tg_accounts WHERE client_key = ? AND status = 'Активен'", (client_key,))
+    active_accs = cursor.fetchall()
     
-    # Проверяем, есть ли у клиента аккаунты
-    cursor.execute("SELECT * FROM client_tg_accounts WHERE client_key = ?", (client_key,))
-    accs = cursor.fetchall()
-    
-    if not accs:
-        res_text = "Ошибка: Для выполнения задачи необходимо добавить хотя бы один Telegram-аккаунт!"
+    if not active_accs:
+        res_text = "Ошибка: Нет активных авторизованных аккаунтов для выполнения задачи!"
     else:
-        res_text = f"Задача '{task_type}' успешно запущена с использованием {len(accs)} аккаунт(-ов)."
+        res_text = f"Задача '{task_type}' запущена. Используется активных аккаунтов: {len(active_accs)}."
         
     cursor.execute(
         "INSERT INTO client_tasks (client_key, task_type, target_link, result_text) VALUES (?, ?, ?, ?)",
