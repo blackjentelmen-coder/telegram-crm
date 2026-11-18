@@ -96,7 +96,7 @@
             box-shadow: 0 0 12px var(--neon-red-glow);
         }
 
-        /* Под-табы внутри спамера и парсера */
+        /* Под-табы */
         .sub-tabs {
             display: grid;
             grid-template-columns: 1fr 1fr;
@@ -138,7 +138,6 @@
             display: block;
         }
 
-        /* Блоки внутри спамера */
         .spam-mode-content {
             display: none;
         }
@@ -177,6 +176,46 @@
         input:focus, textarea:focus {
             border-color: var(--neon-red);
             box-shadow: 0 0 8px var(--neon-red-glow);
+        }
+
+        /* Динамические блоки постов с плюсиками */
+        .dynamic-item {
+            background: #050507;
+            border: 1px solid #261118;
+            padding: 10px;
+            border-radius: 8px;
+            margin-bottom: 8px;
+            position: relative;
+        }
+
+        .btn-remove {
+            background: transparent;
+            color: var(--neon-red);
+            border: none;
+            font-size: 12px;
+            cursor: pointer;
+            float: right;
+            text-transform: uppercase;
+            font-weight: bold;
+        }
+
+        .btn-add-item {
+            background: #111b15;
+            color: #10b981;
+            border: 1px dashed #064e3b;
+            padding: 8px;
+            width: 100%;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: bold;
+            font-size: 12px;
+            text-align: center;
+            margin: 8px 0 15px 0;
+            transition: 0.2s;
+        }
+        .btn-add-item:active {
+            background: #064e3b;
+            color: white;
         }
 
         .btn-action {
@@ -259,6 +298,18 @@
             }
         }
 
+        function setSendOrder(order) {
+            document.getElementById('order-btn-seq').classList.remove('active');
+            document.getElementById('order-btn-rand').classList.remove('active');
+            document.getElementById('spam_order_input').value = order;
+
+            if (order === 'sequential') {
+                document.getElementById('order-btn-seq').classList.add('active');
+            } else {
+                document.getElementById('order-btn-rand').classList.add('active');
+            }
+        }
+
         function setParserMode(mode) {
             document.getElementById('parser-btn-all').classList.remove('active');
             document.getElementById('parser-btn-active').classList.remove('active');
@@ -270,6 +321,31 @@
                 document.getElementById('parser-btn-active').classList.add('active');
                 document.getElementById('parser_mode_input').value = 'active';
             }
+        }
+
+        // Функции динамического добавления полей с плюсиками
+        function addTextPost() {
+            const container = document.getElementById('text-posts-container');
+            const div = document.createElement('div');
+            div.className = 'dynamic-item';
+            div.innerHTML = `
+                <button type="button" class="btn-remove" onclick="this.parentElement.remove()">[ Удалити ]</button>
+                <label style="margin-top:0;">Текст поста:</label>
+                <textarea name="spam_texts[]" rows="3" placeholder="Введите текст сообщения..."></textarea>
+            `;
+            container.appendChild(div);
+        }
+
+        function addLinkPost() {
+            const container = document.getElementById('link-posts-container');
+            const div = document.createElement('div');
+            div.className = 'dynamic-item';
+            div.innerHTML = `
+                <button type="button" class="btn-remove" onclick="this.parentElement.remove()">[ Удалити ]</button>
+                <label style="margin-top:0;">Ссылка на пост ТГ:</label>
+                <input type="text" name="spam_links[]" placeholder="https://t.me/channel/123">
+            `;
+            container.appendChild(div);
         }
     </script>
 </head>
@@ -311,29 +387,48 @@
 
                 <!-- Спамер -->
                 <div id="panel-spammer" class="tool-panel active">
-                    <label>Режим отправки:</label>
+                    <label>Режим отправки контента:</label>
                     <input type="hidden" name="spam_mode" id="spam_mode_input" value="text">
                     <div class="sub-tabs">
-                        <div id="spam-btn-text" class="sub-tab active" onclick="setSpamMode('text')">📝 Текст (Мульти)</div>
-                        <div id="spam-btn-forward" class="sub-tab" onclick="setSpamMode('forward')">🔗 Посты по ссылкам</div>
+                        <div id="spam-btn-text" class="sub-tab active" onclick="setSpamMode('text')">📝 Текстовые посты</div>
+                        <div id="spam-btn-forward" class="sub-tab" onclick="setSpamMode('forward')">🔗 Репост по ссылкам</div>
                     </div>
 
-                    <!-- Режим 1: Несколько текстовых постов (каждый с новой строки) -->
+                    <label>Порядок отправки постов:</label>
+                    <input type="hidden" name="spam_order" id="spam_order_input" value="sequential">
+                    <div class="sub-tabs">
+                        <div id="order-btn-seq" class="sub-tab active" onclick="setSendOrder('sequential')">🔄 Поочередно</div>
+                        <div id="order-btn-rand" class="sub-tab" onclick="setSendOrder('rand')">🔀 Вразнобой (Рандом)</div>
+                    </div>
+
+                    <!-- Режим 1: Динамические текстовые посты с плюсиком -->
                     <div id="spam-content-text" class="spam-mode-content active">
-                        <label>Тексты рассылки (каждый пост с новой строки):</label>
-                        <textarea name="spam_text" rows="4" placeholder="Пост 1...&#10;Пост 2...&#10;Пост 3..."></textarea>
+                        <label>Список постов:</label>
+                        <div id="text-posts-container">
+                            <div class="dynamic-item">
+                                <label style="margin-top:0;">Текст поста:</label>
+                                <textarea name="spam_texts[]" rows="3" placeholder="Введите текст сообщения..."></textarea>
+                            </div>
+                        </div>
+                        <button type="button" class="btn-add-item" onclick="addTextPost()">+ Добавить еще пост</button>
                     </div>
 
-                    <!-- Режим 2: Ссылки на посты ТГ (для пересылки/репоста) -->
+                    <!-- Режим 2: Динамические ссылки на посты с плюсиком -->
                     <div id="spam-content-forward" class="spam-mode-content">
-                        <label>Ссылки на посты в Telegram (по одной на строку):</label>
-                        <textarea name="spam_links" rows="4" placeholder="https://t.me/channel/123&#10;https://t.me/channel/124"></textarea>
+                        <label>Список ссылок на посты ТГ:</label>
+                        <div id="link-posts-container">
+                            <div class="dynamic-item">
+                                <label style="margin-top:0;">Ссылка на пост ТГ:</label>
+                                <input type="text" name="spam_links[]" placeholder="https://t.me/channel/123">
+                            </div>
+                        </div>
+                        <button type="button" class="btn-add-item" onclick="addLinkPost()">+ Добавить еще ссылку</button>
                     </div>
                     
-                    <label>Задержка (сек):</label>
+                    <label>Задержка между сообщениями (сек):</label>
                     <input type="number" name="spam_delay" value="5" min="1">
                     
-                    <label>Лимит на аккаунт:</label>
+                    <label>Лимит сообщений на 1 аккаунт:</label>
                     <input type="number" name="spam_limit" value="20" min="1">
                 </div>
 
