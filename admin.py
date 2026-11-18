@@ -66,12 +66,20 @@ def admin_panel(request: Request):
         status_class = "tag-free" if k["status"] == "free" else "tag-active"
         status_text = "Свободен" if k["status"] == "free" else "Активирован"
         client_display = k["client_name"] if k["client_name"] else "—"
+        note_val = k["note"] if k["note"] else ""
         
         rows_html += f"""
         <tr>
             <td><code>{k["key_code"]}</code></td>
             <td><span class="{status_class}">{status_text}</span></td>
             <td>{client_display}</td>
+            <td>
+                <form action="/admin/keys/update-note" method="POST" style="display: flex; gap: 5px; margin: 0;">
+                    <input type="hidden" name="key_id" value="{k["id"]}">
+                    <input type="text" name="note" value="{note_val}" placeholder="Заметка..." style="padding: 5px; background: #0f172a; border: 1px solid #334155; color: white; border-radius: 4px; font-size: 13px; width: 140px;">
+                    <button type="submit" style="padding: 5px 8px; font-size: 12px; background: #3b82f6; color: white; border: none; border-radius: 4px; cursor: pointer;">💾</button>
+                </form>
+            </td>
             <td>
                 <form action="/admin/keys/delete" method="POST" style="margin:0;">
                     <input type="hidden" name="key_id" value="{k["id"]}">
@@ -88,10 +96,10 @@ def admin_panel(request: Request):
         <meta charset="UTF-8"><title>Админ-панель</title>
         <style>
             body {{ font-family: sans-serif; background: #0f172a; color: #f8fafc; padding: 20px; }}
-            .container {{ max-width: 900px; margin: 0 auto; background: #1e293b; padding: 20px; border-radius: 8px; }}
+            .container {{ max-width: 1000px; margin: 0 auto; background: #1e293b; padding: 20px; border-radius: 8px; }}
             .header {{ display: flex; justify-content: space-between; align-items: center; }}
             table {{ width: 100%; border-collapse: collapse; margin-top: 15px; }}
-            th, td {{ padding: 10px; border-bottom: 1px solid #334155; text-align: left; }}
+            th, td {{ padding: 10px; border-bottom: 1px solid #334155; text-align: left; vertical-align: middle; }}
             .tag-free {{ color: #4ade80; font-weight: bold; }}
             .tag-active {{ color: #f87171; font-weight: bold; }}
             .btn-logout {{ background: #64748b; color: white; padding: 8px 12px; text-decoration: none; border-radius: 4px; font-size: 14px; }}
@@ -100,14 +108,14 @@ def admin_panel(request: Request):
     <body>
         <div class="container">
             <div class="header">
-                <h2>Управление ключами</h2>
+                <h2>Управление ключами и клиентами</h2>
                 <a href="/admin/logout" class="btn-logout">Выйти</a>
             </div>
             <form action="/admin/keys/add" method="POST" style="margin-top: 20px; margin-bottom: 20px;">
                 <button type="submit" style="padding: 10px 15px; background: #3b82f6; color: white; border:none; border-radius:4px; cursor:pointer; font-weight:bold;">Сгенерировать пустой ключ</button>
             </form>
             <table>
-                <tr><th>Ключ</th><th>Статус</th><th>Клиент</th><th>Действие</th></tr>
+                <tr><th>Ключ</th><th>Статус</th><th>Клиент</th><th>Заметка</th><th>Действие</th></tr>
                 {rows_html}
             </table>
         </div>
@@ -123,7 +131,18 @@ def add_key(request: Request):
     db = get_db()
     cursor = db.cursor()
     new_key = str(uuid.uuid4())[:8].upper()
-    cursor.execute("INSERT INTO access_keys (key_code, status, client_name) VALUES (?, 'free', NULL)", (new_key,))
+    cursor.execute("INSERT INTO access_keys (key_code, status, client_name, note) VALUES (?, 'free', NULL, NULL)", (new_key,))
+    db.commit()
+    db.close()
+    return RedirectResponse(url="/admin", status_code=303)
+
+@router.post("/keys/update-note")
+def update_note(request: Request, key_id: int = Form(...), note: str = Form(...)):
+    if request.cookies.get("admin_session") != "authenticated":
+        return RedirectResponse(url="/admin/login", status_code=303)
+    db = get_db()
+    cursor = db.cursor()
+    cursor.execute("UPDATE access_keys SET note = ? WHERE id = ?", (note.strip(), key_id))
     db.commit()
     db.close()
     return RedirectResponse(url="/admin", status_code=303)
