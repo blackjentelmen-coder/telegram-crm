@@ -4,7 +4,7 @@ import qrcode
 import io
 import base64
 from fastapi import FastAPI, Form, Request, Response
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, FileResponse
 from database import init_db, get_db
 import admin
 import uuid
@@ -104,7 +104,7 @@ def login_client(response: Response, key_code: str = Form(...)):
     return resp
 
 @app.get("/cabinet", response_class=HTMLResponse)
-def client_cabinet(request: Request, message: str = None):
+def client_cabinet(request: Request):
     client_key = request.cookies.get("client_session")
     if not client_key:
         return RedirectResponse(url="/", status_code=303)
@@ -113,140 +113,13 @@ def client_cabinet(request: Request, message: str = None):
     cursor = db.cursor()
     cursor.execute("SELECT * FROM access_keys WHERE key_code = ?", (client_key,))
     key_row = cursor.fetchone()
-    
-    cursor.execute("SELECT * FROM client_tg_accounts WHERE client_key = ? ORDER BY id DESC", (client_key,))
-    my_accounts = cursor.fetchall()
-    
-    cursor.execute("SELECT * FROM client_tasks WHERE client_key = ? ORDER BY id DESC LIMIT 5", (client_key,))
-    tasks = cursor.fetchall()
     db.close()
     
     if not key_row:
         return RedirectResponse(url="/logout-client", status_code=303)
         
-    client_name = key_row["client_name"] or "Гость"
-    
-    accounts_html = ""
-    for acc in my_accounts:
-        status_color = "#4ade80" if acc["status"] == "Активен" else "#f87171"
-        
-        if acc["status"] == "Ожидает код":
-            action_form = f"""
-            <form action="/cabinet/verify-code" method="POST" style="display: flex; gap: 5px; margin-top: 8px;">
-                <input type="hidden" name="acc_id" value="{acc["id"]}">
-                <input type="text" name="code" placeholder="Код из ТГ..." required style="padding: 6px; width: 120px; margin: 0; background: #0f172a; border: 1px solid #334155; color: white; border-radius: 4px; font-size: 13px;">
-                <button type="submit" style="padding: 6px 12px; font-size: 12px; background: #10b981;">Подтвердить</button>
-            </form>
-            """
-        else:
-            action_form = ""
-
-        accounts_html += f"""
-        <div style="background: #0f172a; padding: 12px; border-radius: 6px; margin-bottom: 10px; font-size: 14px;">
-            <div style="display: flex; justify-content: space-between; align-items: center;">
-                <div><b>{acc["phone"]}</b> <span style="color: {status_color}; margin-left: 10px; font-size: 12px;">[{acc["status"]}]</span></div>
-                <form action="/cabinet/delete-account" method="POST" style="margin:0;">
-                    <input type="hidden" name="acc_id" value="{acc["id"]}">
-                    <button type="submit" style="padding: 4px 8px; font-size: 11px; background: #ef4444;">Удалить</button>
-                </form>
-            </div>
-            {action_form}
-        </div>
-        """
-        
-    tasks_html = ""
-    for t in tasks:
-        tasks_html += f"""
-        <div style="background: #0f172a; padding: 10px; border-radius: 4px; margin-bottom: 8px; font-size: 13px;">
-            <div><b>[{t["task_type"]}]</b> ссылка: <a href="{t["target_link"]}" target="_blank" style="color: #60a5fa;">{t["target_link"]}</a></div>
-            <div style="margin-top: 4px; color: #4ade80;">{t["result_text"]}</div>
-        </div>
-        """
-        
-    msg_div = f'<div style="background: #065f46; color: #6ee7b7; padding: 10px; border-radius: 4px; margin-bottom: 15px; font-size: 14px;">{message}</div>' if message else ""
-
-    return f"""
-    <!DOCTYPE html>
-    <html lang="ru">
-    <head>
-        <meta charset="UTF-8"><title>Личный кабинет</title>
-        <style>
-            body {{ font-family: sans-serif; background: #0f172a; color: #f8fafc; padding: 20px; display: flex; justify-content: center; }}
-            .wrapper {{ width: 650px; display: flex; flex-direction: column; gap: 20px; }}
-            .card {{ background: #1e293b; padding: 25px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.3); }}
-            code {{ background: #0f172a; padding: 4px 8px; border-radius: 4px; color: #4ade80; }}
-            input[type="text"] {{ width: 100%; padding: 10px; margin: 8px 0; background: #0f172a; border: 1px solid #334155; color: white; border-radius: 4px; box-sizing: border-box; }}
-            select {{ width: 100%; padding: 10px; margin: 8px 0; background: #0f172a; border: 1px solid #334155; color: white; border-radius: 4px; box-sizing: border-box; }}
-            button {{ padding: 10px 15px; background: #3b82f6; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; }}
-            button:hover {{ background: #2563eb; }}
-            .btn-exit {{ background: #ef4444; color: white; padding: 8px 12px; text-decoration: none; border-radius: 4px; display: inline-block; font-weight: bold; font-size: 13px; }}
-            .auth-box {{ display: flex; gap: 20px; margin-top: 15px; }}
-            .auth-option {{ flex: 1; background: #0f172a; padding: 15px; border-radius: 6px; border: 1px solid #334155; }}
-        </style>
-    </head>
-    <body>
-        <div class="wrapper">
-            <div class="card" style="display: flex; justify-content: space-between; align-items: center;">
-                <div>
-                    <h3 style="margin: 0 0 5px 0;">Клиент: {client_name}</h3>
-                    <p style="margin: 0; font-size: 13px; color: #94a3b8;">Ключ: <code>{key_row["key_code"]}</code></p>
-                </div>
-                <a href="/logout-client" class="btn-exit">Выйти</a>
-            </div>
-
-            {msg_div}
-
-            <div class="card">
-                <h3 style="margin-top:0;">Мои Telegram-аккаунты</h3>
-                <div style="margin-bottom: 15px;">
-                    {accounts_html if accounts_html else '<p style="color: #64748b; font-size: 13px;">У вас пока нет добавленных аккаунтов.</p>'}
-                </div>
-
-                <div class="auth-box">
-                    <!-- Способ 1: По номеру -->
-                    <div class="auth-option">
-                        <h4 style="margin: 0 0 10px 0; color: #60a5fa; font-size: 14px;">Вход по номеру (SMS)</h4>
-                        <form action="/cabinet/add-account" method="POST">
-                            <input type="text" name="phone" placeholder="+380..." required style="margin: 0 0 10px 0;">
-                            <button type="submit" style="width: 100%; background: #10b981; font-size: 13px;">Запросить код</button>
-                        </form>
-                    </div>
-
-                    <!-- Способ 2: По QR-коду -->
-                    <div class="auth-option" style="text-align: center;">
-                        <h4 style="margin: 0 0 10px 0; color: #c084fc; font-size: 14px;">Вход по QR-коду</h4>
-                        <form action="/cabinet/start-qr" method="GET">
-                            <button type="submit" style="width: 100%; background: #9333ea; font-size: 13px;">Получить QR-код</button>
-                        </form>
-                    </div>
-                </div>
-            </div>
-
-            <div class="card">
-                <h3 style="margin-top:0;">Панель инструментов</h3>
-                <form action="/cabinet/run-task" method="POST">
-                    <label style="font-size: 13px; color: #94a3b8;">Выберите инструмент:</label>
-                    <select name="task_type">
-                        <option value="Парсер">Парсер (проверка наличия / сбор чата)</option>
-                        <option value="Инвайтер">Инвайтер (добавление в чат)</option>
-                        <option value="Рассылка">Рассылка (SMS по контактам)</option>
-                    </select>
-
-                    <label style="font-size: 13px; color: #94a3b8; display: block; margin-top: 10px;">Ссылка на ресурс / чат / пост:</label>
-                    <input type="text" name="target_link" placeholder="https://t.me/..." required>
-                    
-                    <button type="submit" style="margin-top: 10px; width: 100%;">Запустить задачу</button>
-                </form>
-            </div>
-
-            <div class="card">
-                <h3 style="margin-top:0;">История задач</h3>
-                {tasks_html if tasks_html else '<p style="color: #64748b; font-size: 13px;">История пока пуста.</p>'}
-            </div>
-        </div>
-    </body>
-    </html>
-    """
+    # Возвращаем твой красивый файл index.html в стиле Telegram вместо старого текста
+    return FileResponse("index.html")
 
 @app.get("/cabinet/start-qr", response_class=HTMLResponse)
 async def start_qr_auth(request: Request):
@@ -259,11 +132,9 @@ async def start_qr_auth(request: Request):
     
     try:
         qr = await client.qr_login()
-        # Сохраняем клиент во временный словарь для проверки сканирования
         session_id = uuid.uuid4().hex
         qr_sessions[session_id] = {"client": client, "qr": qr}
         
-        # Генерируем картинку QR-кода в base64
         img = qrcode.make(qr.url)
         buffered = io.BytesIO()
         img.save(buffered, format="PNG")
@@ -274,7 +145,7 @@ async def start_qr_auth(request: Request):
         <html lang="ru">
         <head>
             <meta charset="UTF-8"><title>Авторизация по QR</title>
-            <meta http-equiv="refresh" content="5"> <!-- Автообновление страницы каждые 5 сек для проверки статуса -->
+            <meta http-equiv="refresh" content="5">
             <style>
                 body {{ font-family: sans-serif; background: #0f172a; color: #f8fafc; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }}
                 .card {{ background: #1e293b; padding: 30px; border-radius: 8px; width: 320px; text-align: center; box-shadow: 0 4px 6px rgba(0,0,0,0.3); }}
@@ -285,7 +156,7 @@ async def start_qr_auth(request: Request):
         <body>
             <div class="card">
                 <h3 style="margin-top: 0;">Сканируйте QR-код</h3>
-                <p style="font-size: 13px; color: #94a3b8;">Откройте Telegram на телефоне: <b>Настройки → Устройства → Подключить устройство</b></p>
+                <p style="font-size: 13px; color: #94a3b8;">Откройте Telegram: <b>Настройки → Устройства → Подключить устройство</b></p>
                 <img src="data:image/png;base64,{img_str}" alt="QR Code">
                 <p style="font-size: 12px; color: #facc15;">Ожидание сканирования...</p>
                 <a href="/cabinet/check-qr?sid={session_id}" style="display:inline-block; margin-top:10px; padding:8px 15px; background:#3b82f6; color:white; border-radius:4px; text-decoration:none; font-weight:bold; font-size:13px;">Проверить вход</a>
@@ -310,12 +181,7 @@ async def check_qr_auth(request: Request, sid: str):
     qr = data["qr"]
     
     try:
-        # Проверяем, отсканировал ли пользователь QR
         await qr.wait(timeout=3)
-        
-        # Если успешно авторизовались:
-        phone = client.get_me().phone if hasattr(client, 'get_me') else "Аккаунт QR"
-        # Получаем номер или подставляем заглушку, если api не возвращает телефон сразу
         me = await client.get_me()
         phone_str = f"+{me.phone}" if me and me.phone else "QR-Аккаунт"
         
@@ -332,9 +198,8 @@ async def check_qr_auth(request: Request, sid: str):
         db.commit()
         db.close()
         
-        return RedirectResponse(url="/cabinet?message=QR-код успешно сканирован, аккаунт активирован!", status_code=303)
+        return RedirectResponse(url="/cabinet?message=QR-код успешно сканирован!", status_code=303)
     except asyncio.TimeoutError:
-        # Еще не отсканировал, перенаправляем обратно на экран QR
         return RedirectResponse(url=f"/cabinet/start-qr", status_code=303)
     except Exception as e:
         del qr_sessions[sid]
@@ -365,7 +230,7 @@ async def add_client_account(request: Request, phone: str = Form(...)):
         db.commit()
         db.close()
         
-        return RedirectResponse(url="/cabinet?message=Код отправлен в официальный Telegram-аккаунт номера!", status_code=303)
+        return RedirectResponse(url="/cabinet?message=Код отправлен!", status_code=303)
     except Exception as e:
         await client.disconnect()
         return RedirectResponse(url=f"/cabinet?message=Ошибка запроса кода: {str(e)}", status_code=303)
@@ -433,9 +298,9 @@ def run_client_task(request: Request, task_type: str = Form(...), target_link: s
     active_accs = cursor.fetchall()
     
     if not active_accs:
-        res_text = "Ошибка: Нет активных авторизованных аккаунтов для выполнения задачи!"
+        res_text = "Ошибка: Нет активных авторизованных аккаунтов!"
     else:
-        res_text = f"Задача '{task_type}' запущена. Используется активных аккаунтов: {len(active_accs)}."
+        res_text = f"Задача '{task_type}' запущена. Аккаунтов: {len(active_accs)}."
         
     cursor.execute(
         "INSERT INTO client_tasks (client_key, task_type, target_link, result_text) VALUES (?, ?, ?, ?)",
