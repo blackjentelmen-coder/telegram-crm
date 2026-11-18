@@ -68,7 +68,7 @@
             text-transform: uppercase;
         }
 
-        /* Неоновые табы-кнопки выбора инструмента вместо системного селекта */
+        /* Неоновые табы-кнопки выбора инструмента */
         .tool-tabs {
             display: grid;
             grid-template-columns: repeat(3, 1fr);
@@ -96,7 +96,34 @@
             box-shadow: 0 0 12px var(--neon-red-glow);
         }
 
-        /* Всплывающие/переключаемые блоки настроек */
+        /* Под-табы внутри парсера */
+        .parser-tabs {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+            margin: 6px 0 10px 0;
+        }
+
+        .parser-tab {
+            background: #050507;
+            border: 1px solid #261118;
+            color: var(--text-muted);
+            padding: 8px;
+            text-align: center;
+            border-radius: 6px;
+            font-size: 11px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: 0.2s;
+        }
+
+        .parser-tab.active {
+            background: rgba(255, 30, 66, 0.2);
+            border-color: var(--neon-red);
+            color: white;
+        }
+
+        /* Всплывающие панели настроек */
         .tool-panel {
             display: none;
             background: #09090c;
@@ -190,12 +217,9 @@
     </style>
     <script>
         function selectTool(toolName) {
-            // Убираем активный класс у всех кнопок-табов
             document.querySelectorAll('.tool-tab').forEach(tab => tab.classList.remove('active'));
-            // Скрываем все панели настроек
             document.querySelectorAll('.tool-panel').forEach(panel => panel.classList.remove('active'));
 
-            // Включаем нужную кнопку и показываем соответствующее всплывающее окно-панель
             if (toolName === 'spammer') {
                 document.getElementById('tab-spammer').classList.add('active');
                 document.getElementById('panel-spammer').classList.add('active');
@@ -208,6 +232,19 @@
                 document.getElementById('tab-parser').classList.add('active');
                 document.getElementById('panel-parser').classList.add('active');
                 document.getElementById('current_task_input').value = 'parser';
+            }
+        }
+
+        function setParserMode(mode) {
+            document.getElementById('parser-btn-all').classList.remove('active');
+            document.getElementById('parser-btn-active').classList.remove('active');
+
+            if (mode === 'all') {
+                document.getElementById('parser-btn-all').classList.add('active');
+                document.getElementById('parser_mode_input').value = 'all';
+            } else {
+                document.getElementById('parser-btn-active').classList.add('active');
+                document.getElementById('parser_mode_input').value = 'active';
             }
         }
     </script>
@@ -234,22 +271,21 @@
             <a href="/cabinet/start-qr"><button class="btn-success" style="border-color: #581c87; color: #a855f7; margin-top:0;">ВХОД ПО QR-КОДУ</button></a>
         </div>
 
-        <!-- Панель задач с кастомными неоновыми вкладками -->
+        <!-- Панель задач -->
         <div class="card">
             <h3>Панель инструментов</h3>
             
             <form action="/cabinet/run-task" method="POST">
-                <!-- Скрытое поле, куда запишется выбранный инструмент -->
                 <input type="hidden" name="task_type" id="current_task_input" value="spammer">
 
-                <!-- Кнопки выбора (вместо системного выпадающего списка) -->
+                <!-- Кнопки выбора инструмента -->
                 <div class="tool-tabs">
                     <div id="tab-spammer" class="tool-tab active" onclick="selectTool('spammer')">🚀 Спамер</div>
                     <div id="tab-inviter" class="tool-tab" onclick="selectTool('inviter')">👥 Инвайтер</div>
                     <div id="tab-parser" class="tool-tab" onclick="selectTool('parser')">🔍 Парсер</div>
                 </div>
 
-                <!-- Всплывающий блок настроек: Спамер -->
+                <!-- Спамер -->
                 <div id="panel-spammer" class="tool-panel active">
                     <label>Текст рассылки:</label>
                     <textarea name="spam_text" rows="3" placeholder="Введите текст сообщения..."></textarea>
@@ -261,7 +297,7 @@
                     <input type="number" name="spam_limit" value="20" min="1">
                 </div>
 
-                <!-- Всплывающий блок настроек: Инвайтер -->
+                <!-- Инвайтер -->
                 <div id="panel-inviter" class="tool-panel">
                     <label>Чат-донор (откуда брать):</label>
                     <input type="text" name="inviter_source" placeholder="https://t.me/donor_chat">
@@ -276,13 +312,20 @@
                     <input type="number" name="inviter_delay" value="10" min="1">
                 </div>
 
-                <!-- Всплывающий блок настроек: Парсер -->
+                <!-- Парсер -->
                 <div id="panel-parser" class="tool-panel">
                     <label>Ссылка на чат для парсинга:</label>
                     <input type="text" name="parser_target" placeholder="https://t.me/target_chat">
                     
-                    <label>Что собирать:</label>
-                    <input type="text" name="parser_mode" value="Участники (активные)" readonly style="color: var(--text-muted);">
+                    <label>Режим сбора базы:</label>
+                    <!-- Скрытое поле, куда сохраняется выбранный режим парсера -->
+                    <input type="hidden" name="parser_mode" id="parser_mode_input" value="active">
+
+                    <!-- Интерактивные неоновые кнопки переключения -->
+                    <div class="parser-tabs">
+                        <div id="parser-btn-all" class="parser-tab" onclick="setParserMode('all')">📂 Все участники</div>
+                        <div id="parser-btn-active" class="parser-tab active" onclick="setParserMode('active')">⚡ Только активные</div>
+                    </div>
                 </div>
 
                 <button type="submit" class="btn-action">ЗАПУСТИТЬ В РАБОТУ</button>
