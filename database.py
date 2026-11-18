@@ -1,32 +1,20 @@
 import sqlite3
 
-DB_FILE = "crm_database.db"
+def get_db():
+    db = sqlite3.connect("database.db", check_same_thread=False)
+    db.row_factory = sqlite3.Row
+    return db
 
 def init_db():
-    conn = sqlite3.connect(DB_FILE)
-    cursor = conn.cursor()
-    
+    db = get_db()
+    cursor = db.cursor()
+    # Создаем таблицу ключей, если её еще нет
     cursor.execute("""
-        CREATE TABLE IF NOT EXISTS users (
+        CREATE TABLE IF NOT EXISTS access_keys (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            access_key TEXT UNIQUE NOT NULL,
-            tier TEXT DEFAULT 'light'
+            key_code TEXT NOT NULL,
+            status TEXT DEFAULT 'free'
         )
     """)
-    
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS accounts (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER,
-            phone TEXT,
-            session_string TEXT,
-            proxy TEXT,
-            status TEXT DEFAULT 'disconnected'
-        )
-    """)
-    
-    conn.commit()
-    conn.close()
-
-if __name__ == "__main__":
-    init_db()
+    db.commit()
+    db.close()
