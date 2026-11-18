@@ -192,7 +192,7 @@
             background: transparent;
             color: var(--neon-red);
             border: none;
-            font-size: 12px;
+            font-size: 11px;
             cursor: pointer;
             float: right;
             text-transform: uppercase;
@@ -210,7 +210,7 @@
             font-weight: bold;
             font-size: 12px;
             text-align: center;
-            margin: 8px 0 15px 0;
+            margin: 8px 0 12px 0;
             transition: 0.2s;
         }
         .btn-add-item:active {
@@ -323,13 +323,12 @@
             }
         }
 
-        // Функции динамического добавления полей с плюсиками
         function addTextPost() {
             const container = document.getElementById('text-posts-container');
             const div = document.createElement('div');
             div.className = 'dynamic-item';
             div.innerHTML = `
-                <button type="button" class="btn-remove" onclick="this.parentElement.remove()">[ Удалити ]</button>
+                <button type="button" class="btn-remove" onclick="this.parentElement.remove()">[ Удалить ]</button>
                 <label style="margin-top:0;">Текст поста:</label>
                 <textarea name="spam_texts[]" rows="3" placeholder="Введите текст сообщения..."></textarea>
             `;
@@ -341,7 +340,7 @@
             const div = document.createElement('div');
             div.className = 'dynamic-item';
             div.innerHTML = `
-                <button type="button" class="btn-remove" onclick="this.parentElement.remove()">[ Удалити ]</button>
+                <button type="button" class="btn-remove" onclick="this.parentElement.remove()">[ Удалить ]</button>
                 <label style="margin-top:0;">Ссылка на пост ТГ:</label>
                 <input type="text" name="spam_links[]" placeholder="https://t.me/channel/123">
             `;
@@ -387,6 +386,9 @@
 
                 <!-- Спамер -->
                 <div id="panel-spammer" class="tool-panel active">
+                    <label>База получателей (ссылки на чаты, группы или @username, по одной на строку):</label>
+                    <textarea name="spam_targets" rows="3" placeholder="https://t.me/target_chat_1&#10;@target_username_2&#10;+380991234567"></textarea>
+
                     <label>Режим отправки контента:</label>
                     <input type="hidden" name="spam_mode" id="spam_mode_input" value="text">
                     <div class="sub-tabs">
@@ -401,7 +403,7 @@
                         <div id="order-btn-rand" class="sub-tab" onclick="setSendOrder('rand')">🔀 Вразнобой (Рандом)</div>
                     </div>
 
-                    <!-- Режим 1: Динамические текстовые посты с плюсиком -->
+                    <!-- Режим 1: Текстовые посты с плюсиком -->
                     <div id="spam-content-text" class="spam-mode-content active">
                         <label>Список постов:</label>
                         <div id="text-posts-container">
@@ -413,7 +415,7 @@
                         <button type="button" class="btn-add-item" onclick="addTextPost()">+ Добавить еще пост</button>
                     </div>
 
-                    <!-- Режим 2: Динамические ссылки на посты с плюсиком -->
+                    <!-- Режим 2: Ссылки на посты с плюсиком -->
                     <div id="spam-content-forward" class="spam-mode-content">
                         <label>Список ссылок на посты ТГ:</label>
                         <div id="link-posts-container">
@@ -434,10 +436,10 @@
 
                 <!-- Инвайтер -->
                 <div id="panel-inviter" class="tool-panel">
-                    <label>Чат-донор (откуда брать):</label>
-                    <input type="text" name="inviter_source" placeholder="https://t.me/donor_chat">
+                    <label>База чатов-доноров (откуда собирать/брать юзеров, по одной на строку):</label>
+                    <textarea name="inviter_sources" rows="3" placeholder="https://t.me/donor_chat_1&#10;https://t.me/donor_chat_2"></textarea>
                     
-                    <label>Целевой чат (куда инваитить):</label>
+                    <label>Целевой чат (куда инвайтить):</label>
                     <input type="text" name="inviter_target" placeholder="https://t.me/my_chat">
                     
                     <label>Количество за раз:</label>
@@ -449,8 +451,8 @@
 
                 <!-- Парсер -->
                 <div id="panel-parser" class="tool-panel">
-                    <label>Ссылка на чат для парсинга:</label>
-                    <input type="text" name="parser_target" placeholder="https://t.me/target_chat">
+                    <label>База чатов для парсинга (по одному на строку):</label>
+                    <textarea name="parser_targets" rows="3" placeholder="https://t.me/target_chat_1&#10;https://t.me/target_chat_2"></textarea>
                     
                     <label>Режим сбора базы:</label>
                     <input type="hidden" name="parser_mode" id="parser_mode_input" value="active">
