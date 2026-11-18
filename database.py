@@ -8,7 +8,6 @@ def get_db():
 def init_db():
     db = get_db()
     cursor = db.cursor()
-    # Создаем таблицу с учетом имени клиента
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS access_keys (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
