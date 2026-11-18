@@ -20,7 +20,7 @@
             background: var(--bg-color);
             color: var(--text-main);
             margin: 0;
-            padding: 15px;
+            padding: 12px;
         }
 
         .container {
@@ -31,9 +31,9 @@
         .card {
             background: var(--card-bg);
             border: 1px solid var(--border-color);
-            padding: 20px;
-            border-radius: 14px;
-            margin-bottom: 15px;
+            padding: 15px;
+            border-radius: 12px;
+            margin-bottom: 12px;
             box-shadow: 0 4px 20px rgba(0, 0, 0, 0.7);
         }
 
@@ -47,91 +47,83 @@
             background: transparent;
             color: var(--neon-red);
             border: 1px solid var(--neon-red);
-            padding: 6px 14px;
-            border-radius: 8px;
+            padding: 5px 10px;
+            border-radius: 6px;
             cursor: pointer;
             font-weight: bold;
-            font-size: 13px;
-            box-shadow: 0 0 10px var(--neon-red-glow);
-            transition: 0.2s;
-        }
-        .btn-danger:active {
-            background: var(--neon-red);
-            color: white;
+            font-size: 11px;
+            box-shadow: 0 0 8px var(--neon-red-glow);
         }
 
         h3 {
             margin-top: 0;
-            font-size: 15px;
+            margin-bottom: 10px;
+            font-size: 14px;
             color: var(--text-main);
             letter-spacing: 0.5px;
             text-transform: uppercase;
         }
 
-        /* Неоновые табы-кнопки выбора инструмента */
         .tool-tabs {
             display: grid;
             grid-template-columns: repeat(3, 1fr);
-            gap: 8px;
-            margin-bottom: 15px;
+            gap: 6px;
+            margin-bottom: 12px;
         }
 
         .tool-tab {
             background: #141419;
             border: 1px solid #2a1b20;
             color: var(--text-muted);
-            padding: 10px 5px;
+            padding: 8px 4px;
             text-align: center;
-            border-radius: 8px;
-            font-size: 12px;
+            border-radius: 6px;
+            font-size: 11px;
             font-weight: bold;
             cursor: pointer;
-            transition: all 0.2s ease;
         }
 
         .tool-tab.active {
             background: rgba(255, 30, 66, 0.15);
             border-color: var(--neon-red);
             color: #fff;
-            box-shadow: 0 0 12px var(--neon-red-glow);
+            box-shadow: 0 0 10px var(--neon-red-glow);
         }
 
-        /* Под-табы */
-        .sub-tabs {
+        .select-group {
             display: grid;
             grid-template-columns: 1fr 1fr;
-            gap: 8px;
-            margin: 6px 0 10px 0;
+            gap: 6px;
+            margin: 5px 0 10px 0;
         }
 
-        .sub-tab {
+        .select-option {
             background: #050507;
             border: 1px solid #261118;
             color: var(--text-muted);
-            padding: 8px;
+            padding: 8px 6px;
             text-align: center;
             border-radius: 6px;
-            font-size: 11px;
+            font-size: 10px;
             font-weight: bold;
             cursor: pointer;
-            transition: 0.2s;
+            text-transform: uppercase;
+            line-height: 1.2;
         }
 
-        .sub-tab.active {
+        .select-option.active {
             background: rgba(255, 30, 66, 0.2);
             border-color: var(--neon-red);
             color: white;
         }
 
-        /* Всплывающие панели настроек */
         .tool-panel {
             display: none;
             background: #09090c;
             border: 1px solid #1f1116;
-            padding: 15px;
-            border-radius: 10px;
-            margin-bottom: 15px;
-            animation: fadeIn 0.3s ease;
+            padding: 12px;
+            border-radius: 8px;
+            margin-bottom: 12px;
         }
 
         .tool-panel.active {
@@ -145,46 +137,39 @@
             display: block;
         }
 
-        @keyframes fadeIn {
-            from { opacity: 0; transform: translateY(-4px); }
-            to { opacity: 1; transform: translateY(0); }
-        }
-
         label {
-            font-size: 11px;
+            font-size: 10px;
             color: var(--text-muted);
             display: block;
-            margin-top: 8px;
+            margin-top: 6px;
             text-transform: uppercase;
             letter-spacing: 0.5px;
         }
 
         input, textarea {
             width: 100%;
-            padding: 10px;
-            margin: 6px 0;
+            padding: 8px 10px;
+            margin: 4px 0 8px 0;
             background: #050507;
             border: 1px solid #261118;
             color: white;
-            border-radius: 8px;
+            border-radius: 6px;
             box-sizing: border-box;
-            font-size: 14px;
+            font-size: 13px;
             outline: none;
-            transition: border-color 0.2s, box-shadow 0.2s;
         }
 
         input:focus, textarea:focus {
             border-color: var(--neon-red);
-            box-shadow: 0 0 8px var(--neon-red-glow);
+            box-shadow: 0 0 6px var(--neon-red-glow);
         }
 
-        /* Динамические блоки постов с плюсиками */
         .dynamic-item {
             background: #050507;
             border: 1px solid #261118;
-            padding: 10px;
-            border-radius: 8px;
-            margin-bottom: 8px;
+            padding: 8px;
+            border-radius: 6px;
+            margin-bottom: 6px;
             position: relative;
         }
 
@@ -192,7 +177,7 @@
             background: transparent;
             color: var(--neon-red);
             border: none;
-            font-size: 11px;
+            font-size: 10px;
             cursor: pointer;
             float: right;
             text-transform: uppercase;
@@ -203,63 +188,50 @@
             background: #111b15;
             color: #10b981;
             border: 1px dashed #064e3b;
-            padding: 8px;
+            padding: 6px;
             width: 100%;
-            border-radius: 8px;
+            border-radius: 6px;
             cursor: pointer;
             font-weight: bold;
-            font-size: 12px;
+            font-size: 11px;
             text-align: center;
-            margin: 8px 0 12px 0;
-            transition: 0.2s;
-        }
-        .btn-add-item:active {
-            background: #064e3b;
-            color: white;
+            margin: 4px 0 10px 0;
         }
 
         .btn-action {
             background: linear-gradient(135deg, #cc1433, #ff1e42);
             color: white;
             border: none;
-            padding: 12px;
+            padding: 10px;
             width: 100%;
-            border-radius: 8px;
+            border-radius: 6px;
             cursor: pointer;
             font-weight: bold;
-            font-size: 14px;
+            font-size: 13px;
             text-transform: uppercase;
             letter-spacing: 1px;
-            box-shadow: 0 0 15px var(--neon-red-glow);
-            transition: 0.2s;
+            box-shadow: 0 0 12px var(--neon-red-glow);
             margin-top: 5px;
-        }
-        .btn-action:active {
-            transform: scale(0.98);
         }
 
         .btn-success {
             background: #111b15;
             color: #10b981;
             border: 1px solid #064e3b;
-            padding: 10px;
+            padding: 8px;
             width: 100%;
-            border-radius: 8px;
+            border-radius: 6px;
             cursor: pointer;
             font-weight: bold;
-            margin-top: 8px;
-            transition: 0.2s;
-        }
-        .btn-success:active {
-            background: #064e3b;
-            color: white;
+            margin-top: 6px;
+            font-size: 11px;
         }
         
         .history-box {
             color: #6b7280;
-            font-size: 12px;
+            font-size: 11px;
             text-align: center;
-            padding: 10px 0;
+            padding: 5px 0;
         }
     </style>
     <script>
@@ -279,6 +251,21 @@
                 document.getElementById('tab-parser').classList.add('active');
                 document.getElementById('panel-parser').classList.add('active');
                 document.getElementById('current_task_input').value = 'parser';
+            }
+        }
+
+        function setTargetType(type) {
+            document.getElementById('target-btn-chats').classList.remove('active');
+            document.getElementById('target-btn-people').classList.remove('active');
+            document.getElementById('target_type_input').value = type;
+
+            const textarea = document.getElementById('spam-targets-input');
+            if (type === 'chats') {
+                document.getElementById('target-btn-chats').classList.add('active');
+                textarea.placeholder = "https://t.me/chat_1\nhttps://t.me/chat_2";
+            } else {
+                document.getElementById('target-btn-people').classList.add('active');
+                textarea.placeholder = "@username_1\n+380991234567\nhttps://t.me/user_link";
             }
         }
 
@@ -328,9 +315,9 @@
             const div = document.createElement('div');
             div.className = 'dynamic-item';
             div.innerHTML = `
-                <button type="button" class="btn-remove" onclick="this.parentElement.remove()">[ Удалить ]</button>
+                <button type="button" class="btn-remove" onclick="this.parentElement.remove()">[ Удал ]</button>
                 <label style="margin-top:0;">Текст поста:</label>
-                <textarea name="spam_texts[]" rows="3" placeholder="Введите текст сообщения..."></textarea>
+                <textarea name="spam_texts[]" rows="2" placeholder="Введите текст..."></textarea>
             `;
             container.appendChild(div);
         }
@@ -340,7 +327,7 @@
             const div = document.createElement('div');
             div.className = 'dynamic-item';
             div.innerHTML = `
-                <button type="button" class="btn-remove" onclick="this.parentElement.remove()">[ Удалить ]</button>
+                <button type="button" class="btn-remove" onclick="this.parentElement.remove()">[ Удал ]</button>
                 <label style="margin-top:0;">Ссылка на пост ТГ:</label>
                 <input type="text" name="spam_links[]" placeholder="https://t.me/channel/123">
             `;
@@ -353,8 +340,8 @@
         <!-- Шапка -->
         <div class="card header">
             <div>
-                <div style="font-size: 11px; color: var(--text-muted); text-transform: uppercase;">Система</div>
-                <div style="font-weight: bold; font-size: 15px; color: var(--neon-red); letter-spacing: 1px;">GHOSTCORE</div>
+                <div style="font-size: 10px; color: var(--text-muted); text-transform: uppercase;">Система</div>
+                <div style="font-weight: bold; font-size: 14px; color: var(--neon-red); letter-spacing: 1px;">GHOSTCORE</div>
             </div>
             <a href="/logout-client" style="text-decoration: none;"><button class="btn-danger">ВЫЙТИ</button></a>
         </div>
@@ -366,7 +353,7 @@
                 <input type="text" name="phone" placeholder="+380..." required>
                 <button type="submit" class="btn-success">ЗАПРОСИТЬ SMS КОД</button>
             </form>
-            <div style="text-align: center; margin: 8px 0; color: #4b5563; font-size: 11px;">ИЛИ АВТОРИЗАЦИЯ</div>
+            <div style="text-align: center; margin: 6px 0; color: #4b5563; font-size: 10px;">ИЛИ АВТОРИЗАЦИЯ</div>
             <a href="/cabinet/start-qr"><button class="btn-success" style="border-color: #581c87; color: #a855f7; margin-top:0;">ВХОД ПО QR-КОДУ</button></a>
         </div>
 
@@ -386,58 +373,65 @@
 
                 <!-- Спамер -->
                 <div id="panel-spammer" class="tool-panel active">
-                    <label>База получателей (ссылки на чаты, группы или @username, по одной на строку):</label>
-                    <textarea name="spam_targets" rows="3" placeholder="https://t.me/target_chat_1&#10;@target_username_2&#10;+380991234567"></textarea>
+                    <label>Куда отправляем:</label>
+                    <input type="hidden" name="target_type" id="target_type_input" value="chats">
+                    <div class="select-group">
+                        <div id="target-btn-chats" class="select-option active" onclick="setTargetType('chats')">💬 Рассылка по чатам</div>
+                        <div id="target-btn-people" class="select-option" onclick="setTargetType('people')">👤 Рассылка по людям (Линки / Номера)</div>
+                    </div>
 
-                    <label>Режим отправки контента:</label>
+                    <label>Список целей (по одной на строку):</label>
+                    <textarea id="spam-targets-input" name="spam_targets" rows="3" placeholder="https://t.me/chat_1&#10;https://t.me/chat_2"></textarea>
+
+                    <label>Режим контента:</label>
                     <input type="hidden" name="spam_mode" id="spam_mode_input" value="text">
-                    <div class="sub-tabs">
-                        <div id="spam-btn-text" class="sub-tab active" onclick="setSpamMode('text')">📝 Текстовые посты</div>
-                        <div id="spam-btn-forward" class="sub-tab" onclick="setSpamMode('forward')">🔗 Репост по ссылкам</div>
+                    <div class="select-group">
+                        <div id="spam-btn-text" class="select-option active" onclick="setSpamMode('text')">📝 Текст</div>
+                        <div id="spam-btn-forward" class="select-option" onclick="setSpamMode('forward')">🔄 Репост</div>
                     </div>
 
-                    <label>Порядок отправки постов:</label>
+                    <label>Порядок отправки:</label>
                     <input type="hidden" name="spam_order" id="spam_order_input" value="sequential">
-                    <div class="sub-tabs">
-                        <div id="order-btn-seq" class="sub-tab active" onclick="setSendOrder('sequential')">🔄 Поочередно</div>
-                        <div id="order-btn-rand" class="sub-tab" onclick="setSendOrder('rand')">🔀 Вразнобой (Рандом)</div>
+                    <div class="select-group">
+                        <div id="order-btn-seq" class="select-option active" onclick="setSendOrder('sequential')">🔄 Поочередно</div>
+                        <div id="order-btn-rand" class="select-option" onclick="setSendOrder('rand')">🔀 Вразнобой</div>
                     </div>
 
-                    <!-- Режим 1: Текстовые посты с плюсиком -->
+                    <!-- Динамические посты -->
                     <div id="spam-content-text" class="spam-mode-content active">
                         <label>Список постов:</label>
                         <div id="text-posts-container">
                             <div class="dynamic-item">
                                 <label style="margin-top:0;">Текст поста:</label>
-                                <textarea name="spam_texts[]" rows="3" placeholder="Введите текст сообщения..."></textarea>
+                                <textarea name="spam_texts[]" rows="2" placeholder="Введите текст..."></textarea>
                             </div>
                         </div>
-                        <button type="button" class="btn-add-item" onclick="addTextPost()">+ Добавить еще пост</button>
+                        <button type="button" class="btn-add-item" onclick="addTextPost()">+ Добавить пост</button>
                     </div>
 
-                    <!-- Режим 2: Ссылки на посты с плюсиком -->
+                    <!-- Динамические ссылки -->
                     <div id="spam-content-forward" class="spam-mode-content">
-                        <label>Список ссылок на посты ТГ:</label>
+                        <label>Ссылки на посты:</label>
                         <div id="link-posts-container">
                             <div class="dynamic-item">
                                 <label style="margin-top:0;">Ссылка на пост ТГ:</label>
                                 <input type="text" name="spam_links[]" placeholder="https://t.me/channel/123">
                             </div>
                         </div>
-                        <button type="button" class="btn-add-item" onclick="addLinkPost()">+ Добавить еще ссылку</button>
+                        <button type="button" class="btn-add-item" onclick="addLinkPost()">+ Добавить ссылку</button>
                     </div>
                     
-                    <label>Задержка между сообщениями (сек):</label>
+                    <label>Задержка (сек):</label>
                     <input type="number" name="spam_delay" value="5" min="1">
                     
-                    <label>Лимит сообщений на 1 аккаунт:</label>
+                    <label>Лимит на аккаунт:</label>
                     <input type="number" name="spam_limit" value="20" min="1">
                 </div>
 
                 <!-- Инвайтер -->
                 <div id="panel-inviter" class="tool-panel">
-                    <label>База чатов-доноров (откуда собирать/брать юзеров, по одной на строку):</label>
-                    <textarea name="inviter_sources" rows="3" placeholder="https://t.me/donor_chat_1&#10;https://t.me/donor_chat_2"></textarea>
+                    <label>База чатов-доноров (по одной на строку):</label>
+                    <textarea name="inviter_sources" rows="3" placeholder="https://t.me/donor_chat"></textarea>
                     
                     <label>Целевой чат (куда инвайтить):</label>
                     <input type="text" name="inviter_target" placeholder="https://t.me/my_chat">
@@ -451,15 +445,15 @@
 
                 <!-- Парсер -->
                 <div id="panel-parser" class="tool-panel">
-                    <label>База чатов для парсинга (по одному на строку):</label>
-                    <textarea name="parser_targets" rows="3" placeholder="https://t.me/target_chat_1&#10;https://t.me/target_chat_2"></textarea>
+                    <label>База чатов для парсинга:</label>
+                    <textarea name="parser_targets" rows="3" placeholder="https://t.me/target_chat"></textarea>
                     
-                    <label>Режим сбора базы:</label>
+                    <label>Режим сбора:</label>
                     <input type="hidden" name="parser_mode" id="parser_mode_input" value="active">
 
-                    <div class="sub-tabs">
-                        <div id="parser-btn-all" class="sub-tab" onclick="setParserMode('all')">📂 Все участники</div>
-                        <div id="parser-btn-active" class="sub-tab active" onclick="setParserMode('active')">⚡ Только активные</div>
+                    <div class="select-group">
+                        <div id="parser-btn-all" class="select-option" onclick="setParserMode('all')">📂 Все</div>
+                        <div id="parser-btn-active" class="select-option active" onclick="setParserMode('active')">⚡ Активные</div>
                     </div>
                 </div>
 
