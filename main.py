@@ -1,159 +1,150 @@
-import uuid
-import sqlite3
-from fastapi import APIRouter, Request, Form, Response
+from fastapi import FastAPI, Form, Request, Response
 from fastapi.responses import HTMLResponse, RedirectResponse
-from database import get_db
+from database import init_db, get_db
+import admin
+import uuid
 
-router = APIRouter(prefix="/admin", tags=["admin"])
+app = FastAPI()
 
-ADMIN_USER = "admin"
-ADMIN_PASS = "secret123"
+init_db()
+app.include_router(admin.router)
 
-@router.get("/login", response_class=HTMLResponse)
-def login_page():
-    return """
+@app.get("/", response_class=HTMLResponse)
+def client_home(request: Request, error: str = None):
+    # Если у клиента уже есть валидная кука сессии, перекидываем в кабинет
+    if request.cookies.get("client_session"):
+        return RedirectResponse(url="/cabinet", status_code=303)
+        
+    err_html = f'<div style="color: #f87171; margin-bottom: 15px; text-align: center;">{error}</div>' if error else ""
+    
+    return f"""
     <!DOCTYPE html>
     <html lang="ru">
     <head>
-        <meta charset="UTF-8"><title>Вход в админку</title>
+        <meta charset="UTF-8"><title>Регистрация и Вход</title>
         <style>
-            body { font-family: sans-serif; background: #0f172a; color: #f8fafc; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
-            .login-box { background: #1e293b; padding: 30px; border-radius: 8px; width: 300px; box-shadow: 0 4px 6px rgba(0,0,0,0.3); }
-            input { width: 100%; padding: 10px; margin: 10px 0; background: #0f172a; border: 1px solid #334155; color: white; border-radius: 4px; box-sizing: border-box; }
-            button { width: 100%; padding: 10px; background: #3b82f6; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; }
+            body {{ font-family: sans-serif; background: #0f172a; color: #f8fafc; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }}
+            .card {{ background: #1e293b; padding: 30px; border-radius: 8px; width: 360px; box-shadow: 0 4px 6px rgba(0,0,0,0.3); }}
+            input {{ width: 100%; padding: 10px; margin: 10px 0; background: #0f172a; border: 1px solid #334155; color: white; border-radius: 4px; box-sizing: border-box; }}
+            button {{ width: 100%; padding: 12px; background: #3b82f6; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; margin-top: 5px; }}
+            button:hover {{ background: #2563eb; }}
+            .divider {{ text-align: center; margin: 20px 0; color: #64748b; font-size: 14px; }}
         </style>
     </head>
     <body>
-        <div class="login-box">
-            <h2 style="text-align: center; margin-top: 0;">Вход в CRM</h2>
-            <form action="/admin/login" method="POST">
-                <input type="text" name="username" placeholder="Логин" required>
-                <input type="password" name="password" placeholder="Пароль" required>
-                <button type="submit">Войти</button>
+        <div class="card">
+            <h2 style="text-align: center; margin-top: 0;">Добро пожаловать</h2>
+            {err_html}
+            
+            <!-- Вариант 1: У клиента уже есть ключ -->
+            <form action="/login" method="POST">
+                <input type="text" name="key_code" placeholder="Введите ваш ключ" required style="text-transform: uppercase;">
+                <button type="submit">Войти по ключу</button>
+            </form>
+            
+            <div class="divider">или</div>
+            
+            <!-- Вариант 2: Получить новый ключ и зарегистрироваться -->
+            <form action="/register" method="POST">
+                <input type="text" name="client_name" placeholder="Ваше Имя" required>
+                <button type="submit" style="background: #10b981;">Получить ключ и войти</button>
             </form>
         </div>
     </body>
     </html>
     """
 
-@router.post("/login")
-def login(response: Response, username: str = Form(...), password: str = Form(...)):
-    if username == ADMIN_USER and password == ADMIN_PASS:
-        resp = RedirectResponse(url="/admin", status_code=303)
-        resp.set_cookie(key="admin_session", value="authenticated", httponly=True)
-        return resp
-    return RedirectResponse(url="/admin/login?error=1", status_code=303)
-
-@router.get("/logout")
-def logout():
-    resp = RedirectResponse(url="/admin/login", status_code=303)
-    resp.delete_cookie(key="admin_session")
+@app.post("/register")
+def register_client(response: Response, client_name: str = Form(...)):
+    db = get_db()
+    cursor = db.cursor()
+    
+    # Генерируем уникальный ключ для клиента
+    new_key = str(uuid.uuid4())[:8].upper()
+    
+    cursor.execute(
+        "INSERT INTO access_keys (key_code, status, client_name) VALUES (?, 'active', ?)",
+        (new_key, client_name.strip())
+    )
+    db.commit()
+    db.close()
+    
+    # Сразу авторизуем клиента через куку по его ключу
+    resp = RedirectResponse(url="/cabinet", status_code=303)
+    resp.set_cookie(key="client_session", value=new_key, httponly=True)
     return resp
 
-@router.get("", response_class=HTMLResponse)
-def admin_panel(request: Request):
-    if request.cookies.get("admin_session") != "authenticated":
-        return RedirectResponse(url="/admin/login", status_code=303)
-    
+@app.post("/login")
+def login_client(response: Response, key_code: str = Form(...)):
+    clean_key = key_code.strip().upper()
     db = get_db()
     cursor = db.cursor()
-    cursor.execute("SELECT * FROM access_keys ORDER BY id DESC")
-    keys = cursor.fetchall()
+    
+    cursor.execute("SELECT * FROM access_keys WHERE key_code = ?", (clean_key,))
+    key_row = cursor.fetchone()
     db.close()
     
-    rows_html = ""
-    for k in keys:
-        status_class = "tag-free" if k["status"] == "free" else "tag-active"
-        status_text = "Свободен" if k["status"] == "free" else "Активирован"
-        client_display = k["client_name"] if k["client_name"] else "—"
-        note_val = k["note"] if k["note"] else ""
+    if not key_row:
+        return RedirectResponse(url="/?error=Неверный ключ доступа", status_code=303)
         
-        rows_html += f"""
-        <tr>
-            <td><code>{k["key_code"]}</code></td>
-            <td><span class="{status_class}">{status_text}</span></td>
-            <td>{client_display}</td>
-            <td>
-                <form action="/admin/keys/update-note" method="POST" style="display: flex; gap: 5px; margin: 0;">
-                    <input type="hidden" name="key_id" value="{k["id"]}">
-                    <input type="text" name="note" value="{note_val}" placeholder="Заметка..." style="padding: 5px; background: #0f172a; border: 1px solid #334155; color: white; border-radius: 4px; font-size: 13px; width: 140px;">
-                    <button type="submit" style="padding: 5px 8px; font-size: 12px; background: #3b82f6; color: white; border: none; border-radius: 4px; cursor: pointer;">💾</button>
-                </form>
-            </td>
-            <td>
-                <form action="/admin/keys/delete" method="POST" style="margin:0;">
-                    <input type="hidden" name="key_id" value="{k["id"]}">
-                    <button type="submit" style="padding:6px 10px; font-size:12px; background:#ef4444; color:white; border:none; border-radius:4px; cursor:pointer;">Удалить</button>
-                </form>
-            </td>
-        </tr>
-        """
+    # Если ключ был свободен — активируем при входе
+    if key_row["status"] == "free":
+        db = get_db()
+        cursor = db.cursor()
+        cursor.execute("UPDATE access_keys SET status = 'active' WHERE id = ?", (key_row["id"],))
+        db.commit()
+        db.close()
 
-    content = f"""
+    resp = RedirectResponse(url="/cabinet", status_code=303)
+    resp.set_cookie(key="client_session", value=clean_key, httponly=True)
+    return resp
+
+@app.get("/cabinet", response_class=HTMLResponse)
+def client_cabinet(request: Request):
+    client_key = request.cookies.get("client_session")
+    if not client_key:
+        return RedirectResponse(url="/", status_code=303)
+        
+    db = get_db()
+    cursor = db.cursor()
+    cursor.execute("SELECT * FROM access_keys WHERE key_code = ?", (client_key,))
+    key_row = cursor.fetchone()
+    db.close()
+    
+    if not key_row:
+        return RedirectResponse(url="/logout-client", status_code=303)
+        
+    client_name = key_row["client_name"] or "Гость"
+    
+    return f"""
     <!DOCTYPE html>
     <html lang="ru">
     <head>
-        <meta charset="UTF-8"><title>Админ-панель</title>
+        <meta charset="UTF-8"><title>Личный кабинет</title>
         <style>
-            body {{ font-family: sans-serif; background: #0f172a; color: #f8fafc; padding: 20px; }}
-            .container {{ max-width: 1000px; margin: 0 auto; background: #1e293b; padding: 20px; border-radius: 8px; }}
-            .header {{ display: flex; justify-content: space-between; align-items: center; }}
-            table {{ width: 100%; border-collapse: collapse; margin-top: 15px; }}
-            th, td {{ padding: 10px; border-bottom: 1px solid #334155; text-align: left; vertical-align: middle; }}
-            .tag-free {{ color: #4ade80; font-weight: bold; }}
-            .tag-active {{ color: #f87171; font-weight: bold; }}
-            .btn-logout {{ background: #64748b; color: white; padding: 8px 12px; text-decoration: none; border-radius: 4px; font-size: 14px; }}
+            body {{ font-family: sans-serif; background: #0f172a; color: #f8fafc; padding: 40px; display: flex; justify-content: center; }}
+            .cabinet {{ background: #1e293b; padding: 30px; border-radius: 8px; width: 400px; box-shadow: 0 4px 6px rgba(0,0,0,0.3); text-align: center; }}
+            code {{ background: #0f172a; padding: 8px 12px; border-radius: 4px; font-size: 18px; color: #4ade80; display: inline-block; margin: 10px 0; letter-spacing: 2px; }}
+            .btn-exit {{ background: #ef4444; color: white; padding: 10px 20px; text-decoration: none; border-radius: 4px; display: inline-block; margin-top: 20px; font-weight: bold; }}
         </style>
     </head>
     <body>
-        <div class="container">
-            <div class="header">
-                <h2>Управление ключами и клиентами</h2>
-                <a href="/admin/logout" class="btn-logout">Выйти</a>
+        <div class="cabinet">
+            <h2>Личный кабинет</h2>
+            <p>Рады видеть вас, <b>{client_name}</b>!</p>
+            <p>Ваш персональный ключ доступа:</p>
+            <code>{key_row["key_code"]}</code>
+            <p style="font-size: 13px; color: #94a3b8; margin-top: 15px;">Сохраните его, чтобы входить на сайт с любых устройств без повторной регистрации.</p>
+            <div>
+                <a href="/logout-client" class="btn-exit">Выйти</a>
             </div>
-            <form action="/admin/keys/add" method="POST" style="margin-top: 20px; margin-bottom: 20px;">
-                <button type="submit" style="padding: 10px 15px; background: #3b82f6; color: white; border:none; border-radius:4px; cursor:pointer; font-weight:bold;">Сгенерировать пустой ключ</button>
-            </form>
-            <table>
-                <tr><th>Ключ</th><th>Статус</th><th>Клиент</th><th>Заметка</th><th>Действие</th></tr>
-                {rows_html}
-            </table>
         </div>
     </body>
     </html>
     """
-    return HTMLResponse(content=content)
 
-@router.post("/keys/add")
-def add_key(request: Request):
-    if request.cookies.get("admin_session") != "authenticated":
-        return RedirectResponse(url="/admin/login", status_code=303)
-    db = get_db()
-    cursor = db.cursor()
-    new_key = str(uuid.uuid4())[:8].upper()
-    cursor.execute("INSERT INTO access_keys (key_code, status, client_name, note) VALUES (?, 'free', NULL, NULL)", (new_key,))
-    db.commit()
-    db.close()
-    return RedirectResponse(url="/admin", status_code=303)
-
-@router.post("/keys/update-note")
-def update_note(request: Request, key_id: int = Form(...), note: str = Form(...)):
-    if request.cookies.get("admin_session") != "authenticated":
-        return RedirectResponse(url="/admin/login", status_code=303)
-    db = get_db()
-    cursor = db.cursor()
-    cursor.execute("UPDATE access_keys SET note = ? WHERE id = ?", (note.strip(), key_id))
-    db.commit()
-    db.close()
-    return RedirectResponse(url="/admin", status_code=303)
-
-@router.post("/keys/delete")
-def delete_key(request: Request, key_id: int = Form(...)):
-    if request.cookies.get("admin_session") != "authenticated":
-        return RedirectResponse(url="/admin/login", status_code=303)
-    db = get_db()
-    cursor = db.cursor()
-    cursor.execute("DELETE FROM access_keys WHERE id = ?", (key_id,))
-    db.commit()
-    db.close()
-    return RedirectResponse(url="/admin", status_code=303)
+@app.get("/logout-client")
+def logout_client():
+    resp = RedirectResponse(url="/", status_code=303)
+    resp.delete_cookie(key="client_session")
+    return resp
