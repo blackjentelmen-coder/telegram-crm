@@ -20,18 +20,19 @@ def init_db():
         )
     """)
     
-    # Аккаунты Telegram, которые добавляет сам клиент
+    # Аккаунты клиентов с поддержкой StringSession Telethon
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS client_tg_accounts (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             client_key TEXT NOT NULL,
             phone TEXT NOT NULL,
-            session_name TEXT NOT NULL,
+            session_string TEXT DEFAULT NULL,
+            phone_code_hash TEXT DEFAULT NULL,
             status TEXT DEFAULT 'pending_code'
         )
     """)
     
-    # История задач (парсер, инвайтер, рассылки)
+    # История задач
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS client_tasks (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
