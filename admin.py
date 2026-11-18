@@ -1,3 +1,4 @@
+import uuid
 import sqlite3
 from fastapi import APIRouter, Request, Form
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -50,6 +51,9 @@ def admin_panel(request: Request):
     <body>
         <div class="container">
             <h2>Управление ключами</h2>
+            <form action="/admin/keys/add" method="POST" style="margin-bottom: 20px;">
+                <button type="submit" style="padding: 10px 15px; background: #3b82f6; color: white; border:none; border-radius:4px; cursor:pointer;">Сгенерировать ключ</button>
+            </form>
             <table>
                 <tr><th>Ключ</th><th>Статус</th><th>Действие</th></tr>
                 {rows_html}
@@ -59,3 +63,22 @@ def admin_panel(request: Request):
     </html>
     """
     return HTMLResponse(content=content)
+
+@router.post("/keys/add")
+def add_key():
+    db = get_db()
+    cursor = db.cursor()
+    new_key = str(uuid.uuid4())[:8].upper()
+    cursor.execute("INSERT INTO access_keys (key_code, status) VALUES (?, 'free')", (new_key,))
+    db.commit()
+    db.close()
+    return RedirectResponse(url="/admin", status_code=303)
+
+@router.post("/keys/delete")
+def delete_key(key_id: int = Form(...)):
+    db = get_db()
+    cursor = db.cursor()
+    cursor.execute("DELETE FROM access_keys WHERE id = ?", (key_id,))
+    db.commit()
+    db.close()
+    return RedirectResponse(url="/admin", status_code=303)
