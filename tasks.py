@@ -10,15 +10,15 @@ async def parse_chat_comprehensive(
 ):
     """
     Универсальный сборщик данных из чата:
-    - Проходит по последним `limit` сообщениям (обход скрытых участников) или собирает конкретного пользователя.
-    - Вытягивает ID, юзернеймы/ссылки, тексты и при возможности номера телефонов.
+    - `limit`: пользователь сам задает, сколько последних сообщений просканировать.
+    - Исключает любые повторения пользователей (уникальность по user_id).
     """
     try:
         chat = await client.get_entity(chat_identifier)
     except Exception as e:
         return {"error": f"Не удалось найти чат: {e}"}
 
-    collected_users = {} # Словарь для уникальных пользователей {user_id: data}
+    collected_users = {}  # Словарь для уникальных пользователей {user_id: data}
     messages_log = []
 
     # Определяем параметры итерации сообщений
@@ -29,7 +29,7 @@ async def parse_chat_comprehensive(
     async for message in client.iter_messages(chat, **kwargs):
         sender = message.sender
         
-        # Собираем данные об авторе сообщения, если он есть
+        # Собираем данные об авторе сообщения без повторов
         if sender and hasattr(sender, "id"):
             uid = sender.id
             if uid not in collected_users:
@@ -56,6 +56,7 @@ async def parse_chat_comprehensive(
 
     return {
         "total_messages_scanned": len(messages_log),
+        "unique_users_count": len(collected_users),
         "unique_users_extracted": list(collected_users.values()),
         "messages": messages_log
     }
