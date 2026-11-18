@@ -281,7 +281,7 @@ def user_login_page(error: str = None):
                 <button type="submit">Войти в систему</button>
             </form>
             <div style="margin-top: 25px; padding-top: 15px; border-top: 1px solid var(--border);">
-                <a href="/admin" class="admin-btn">🔑 Панель администратора</a>
+                <a href="/admin/login" class="admin-btn">🔑 Панель администратора</a>
             </div>
         </div>
     </body>
