@@ -4,7 +4,7 @@ from datetime import datetime
 from fastapi import FastAPI, Form, Request, Response
 from fastapi.responses import HTMLResponse, RedirectResponse
 
-app = FastAPI(title="Telegram CRM", version="2.1")
+app = FastAPI(title="Telegram CRM", version="2.2")
 
 DB_FILE = "crm.db"
 
@@ -81,6 +81,7 @@ BASE_STYLE = """
         justify-content: center;
         align-items: center;
         min-height: 90vh;
+        box-sizing: border-box;
     }
     .container {
         width: 100%;
@@ -121,12 +122,25 @@ BASE_STYLE = """
     th { color: var(--text-muted); }
     .tag-free { color: var(--accent); }
     .tag-active { color: #ffa502; }
-    .back-link { display: inline-block; margin-top: 15px; color: var(--text-muted); text-decoration: none; font-size: 14px; }
-    .back-link:hover { color: var(--text); }
+    .admin-btn {
+        display: block;
+        width: 100%;
+        padding: 12px;
+        background: #1f2937;
+        color: var(--accent);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        text-align: center;
+        text-decoration: none;
+        font-weight: bold;
+        box-sizing: border-box;
+        transition: background 0.2s;
+    }
+    .admin-btn:hover { background: #374151; }
 </style>
 """
 
-# --- 1. АДМИН-ПАНЕЛЬ (ВЫШЕ КЛИЕНТСКИХ МАРШРУТОВ) ---
+# --- 1. АДМИН-ПАНЕЛЬ (ВЫШЕ ВСЕГО) ---
 @app.get("/admin/login", response_class=HTMLResponse)
 def admin_login_page(error: str = None):
     err_html = f'<div class="error">{error}</div>' if error else ''
@@ -139,10 +153,12 @@ def admin_login_page(error: str = None):
             <h2>🔐 Панель Администратора</h2>
             {err_html}
             <form action="/admin/auth" method="POST">
-                <input type="password" name="password" placeholder="Пароль администратора" required>
+                <input type="password" name="password" placeholder="Пароль администратора" required autocomplete="current-password">
                 <button type="submit">Войти в админку</button>
             </form>
-            <a href="/" class="back-link">← Вернуться на главную</a>
+            <div style="margin-top: 15px; text-align: center;">
+                <a href="/" style="color: var(--text-muted); text-decoration: none; font-size: 14px;">← На главную</a>
+            </div>
         </div>
     </body>
     </html>
@@ -185,7 +201,7 @@ def admin_panel(request: Request):
             <td>
                 <form action="/admin/keys/delete" method="POST" style="margin:0;">
                     <input type="hidden" name="key_id" value="{k["id"]}">
-                    <button type="submit" style="padding:4px 8px; font-size:12px; margin:0;" class="btn-danger">Удалить</button>
+                    <button type="submit" style="padding:6px 10px; font-size:12px; margin:0;" class="btn-danger">Удалить</button>
                 </form>
             </td>
         </tr>
@@ -199,24 +215,26 @@ def admin_panel(request: Request):
         <div class="container" style="max-width: 600px;">
             <h2>🛠 Управление ключами доступа</h2>
             <form action="/admin/keys/generate" method="POST">
-                <button type="submit">➕ Сгенерировать пачку (20 новых ключей)</button>
+                <button type="submit">➕ Сгенерировать пачку (20 ключей)</button>
             </form>
             <hr style="border: 0; border-top: 1px solid var(--border); margin: 20px 0;">
-            <h3>Список всех ключей в системе</h3>
-            <table>
-                <thead>
-                    <tr>
-                        <th>Ключ доступа</th>
-                        <th>Статус</th>
-                        <th>Действие</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {rows_html if rows_html else '<tr><td colspan="3" style="text-align:center; color:var(--text-muted);">Ключей пока нет. Нажми кнопку выше.</td></tr>'}
-                </tbody>
-            </table>
+            <h3>Список ключей в системе</h3>
+            <div style="max-height: 350px; overflow-y: auto;">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Ключ</th>
+                            <th>Статус</th>
+                            <th>Действие</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {rows_html if rows_html else '<tr><td colspan="3" style="text-align:center; color:var(--text-muted);">Ключей пока нет. Нажми кнопку выше.</td></tr>'}
+                    </tbody>
+                </table>
+            </div>
             <div style="margin-top: 25px; display: flex; justify-content: space-between; align-items: center;">
-                <a href="/" class="back-link">🚪 На сайт</a>
+                <a href="/" style="color: var(--text-muted); text-decoration: none; font-size: 14px;">🚪 На сайт</a>
                 <a href="/logout" style="color: var(--danger); text-decoration: none; font-size: 14px;">Выйти из админки</a>
             </div>
         </div>
@@ -254,14 +272,14 @@ def user_login_page(error: str = None):
     <body>
         <div class="container">
             <h2>Telegram CRM</h2>
-            <p style="color: var(--text-muted);">Введите ваш персональный ключ доступа для входа в систему.</p>
+            <p style="color: var(--text-muted);">Введите ваш персональный ключ доступа для входа.</p>
             {err_html}
             <form action="/auth" method="POST">
                 <input type="text" name="key_code" placeholder="CRM-XXXX-XXXX-XXXX" required autocomplete="off">
                 <button type="submit">Войти в систему</button>
             </form>
-            <div style="margin-top: 20px; text-align: center;">
-                <a href="/admin/login" class="back-link">🔑 Вход в панель администратора</a>
+            <div style="margin-top: 25px; padding-top: 15px; border-top: 1px solid var(--border);">
+                <a href="/admin" class="admin-btn">🔑 Панель администратора</a>
             </div>
         </div>
     </body>
@@ -307,10 +325,10 @@ def user_dashboard(request: Request):
     <body>
         <div class="container">
             <h2>🚀 Рабочий кабинет CRM</h2>
-            <p style="color: var(--text-muted);">Авторизованный ключ: <strong>{user_key}</strong></p>
+            <p style="color: var(--text-muted);">Ключ: <strong>{user_key}</strong></p>
             <hr style="border: 0; border-top: 1px solid var(--border); margin: 20px 0;">
-            <p>Здесь находится твой функционал управления аккаунтами, задачами и рассылками.</p>
-            <a href="/logout"><button class="btn-danger">Выйти из системы</button></a>
+            <p>Панель управления клиентами и рассылками активна.</p>
+            <a href="/logout"><button class="btn-danger">Выйти</button></a>
         </div>
     </body>
     </html>
