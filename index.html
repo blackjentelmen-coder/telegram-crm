@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Telegram CRM | Neon Cyber</title>
+    <title>GHOSTCORE</title>
     <style>
         :root {
             --bg-color: #050507;
@@ -96,15 +96,15 @@
             box-shadow: 0 0 12px var(--neon-red-glow);
         }
 
-        /* Под-табы внутри парсера */
-        .parser-tabs {
+        /* Под-табы внутри спамера и парсера */
+        .sub-tabs {
             display: grid;
             grid-template-columns: 1fr 1fr;
             gap: 8px;
             margin: 6px 0 10px 0;
         }
 
-        .parser-tab {
+        .sub-tab {
             background: #050507;
             border: 1px solid #261118;
             color: var(--text-muted);
@@ -117,7 +117,7 @@
             transition: 0.2s;
         }
 
-        .parser-tab.active {
+        .sub-tab.active {
             background: rgba(255, 30, 66, 0.2);
             border-color: var(--neon-red);
             color: white;
@@ -135,6 +135,14 @@
         }
 
         .tool-panel.active {
+            display: block;
+        }
+
+        /* Блоки внутри спамера */
+        .spam-mode-content {
+            display: none;
+        }
+        .spam-mode-content.active {
             display: block;
         }
 
@@ -235,6 +243,22 @@
             }
         }
 
+        function setSpamMode(mode) {
+            document.getElementById('spam-btn-text').classList.remove('active');
+            document.getElementById('spam-btn-forward').classList.remove('active');
+            document.getElementById('spam-content-text').classList.remove('active');
+            document.getElementById('spam-content-forward').classList.remove('active');
+            document.getElementById('spam_mode_input').value = mode;
+
+            if (mode === 'text') {
+                document.getElementById('spam-btn-text').classList.add('active');
+                document.getElementById('spam-content-text').classList.add('active');
+            } else {
+                document.getElementById('spam-btn-forward').classList.add('active');
+                document.getElementById('spam-content-forward').classList.add('active');
+            }
+        }
+
         function setParserMode(mode) {
             document.getElementById('parser-btn-all').classList.remove('active');
             document.getElementById('parser-btn-active').classList.remove('active');
@@ -255,7 +279,7 @@
         <div class="card header">
             <div>
                 <div style="font-size: 11px; color: var(--text-muted); text-transform: uppercase;">Система</div>
-                <div style="font-weight: bold; font-size: 15px; color: var(--neon-red);">KRYPTON COMBO</div>
+                <div style="font-weight: bold; font-size: 15px; color: var(--neon-red); letter-spacing: 1px;">GHOSTCORE</div>
             </div>
             <a href="/logout-client" style="text-decoration: none;"><button class="btn-danger">ВЫЙТИ</button></a>
         </div>
@@ -287,8 +311,24 @@
 
                 <!-- Спамер -->
                 <div id="panel-spammer" class="tool-panel active">
-                    <label>Текст рассылки:</label>
-                    <textarea name="spam_text" rows="3" placeholder="Введите текст сообщения..."></textarea>
+                    <label>Режим отправки:</label>
+                    <input type="hidden" name="spam_mode" id="spam_mode_input" value="text">
+                    <div class="sub-tabs">
+                        <div id="spam-btn-text" class="sub-tab active" onclick="setSpamMode('text')">📝 Текст (Мульти)</div>
+                        <div id="spam-btn-forward" class="sub-tab" onclick="setSpamMode('forward')">🔗 Посты по ссылкам</div>
+                    </div>
+
+                    <!-- Режим 1: Несколько текстовых постов (каждый с новой строки) -->
+                    <div id="spam-content-text" class="spam-mode-content active">
+                        <label>Тексты рассылки (каждый пост с новой строки):</label>
+                        <textarea name="spam_text" rows="4" placeholder="Пост 1...&#10;Пост 2...&#10;Пост 3..."></textarea>
+                    </div>
+
+                    <!-- Режим 2: Ссылки на посты ТГ (для пересылки/репоста) -->
+                    <div id="spam-content-forward" class="spam-mode-content">
+                        <label>Ссылки на посты в Telegram (по одной на строку):</label>
+                        <textarea name="spam_links" rows="4" placeholder="https://t.me/channel/123&#10;https://t.me/channel/124"></textarea>
+                    </div>
                     
                     <label>Задержка (сек):</label>
                     <input type="number" name="spam_delay" value="5" min="1">
@@ -318,13 +358,11 @@
                     <input type="text" name="parser_target" placeholder="https://t.me/target_chat">
                     
                     <label>Режим сбора базы:</label>
-                    <!-- Скрытое поле, куда сохраняется выбранный режим парсера -->
                     <input type="hidden" name="parser_mode" id="parser_mode_input" value="active">
 
-                    <!-- Интерактивные неоновые кнопки переключения -->
-                    <div class="parser-tabs">
-                        <div id="parser-btn-all" class="parser-tab" onclick="setParserMode('all')">📂 Все участники</div>
-                        <div id="parser-btn-active" class="parser-tab active" onclick="setParserMode('active')">⚡ Только активные</div>
+                    <div class="sub-tabs">
+                        <div id="parser-btn-all" class="sub-tab" onclick="setParserMode('all')">📂 Все участники</div>
+                        <div id="parser-btn-active" class="sub-tab active" onclick="setParserMode('active')">⚡ Только активные</div>
                     </div>
                 </div>
 
