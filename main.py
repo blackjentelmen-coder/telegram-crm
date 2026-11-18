@@ -185,12 +185,13 @@ def admin_panel(request: Request):
     if request.cookies.get("admin_session") != "authenticated":
         return RedirectResponse(url="/admin/login", status_code=303)
     
-    db = get_db()
+        db = get_db()
+    db.row_factory = sqlite3.Row  # <-- Добавь эту строчку вот сюда
     cursor = db.cursor()
     cursor.execute("SELECT * FROM access_keys ORDER BY id DESC")
     keys = cursor.fetchall()
     db.close()
-    
+
     rows_html = ""
     for k in keys:
         status_class = "tag-free" if k["status"] == "free" else "tag-active"
