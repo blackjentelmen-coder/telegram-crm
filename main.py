@@ -191,11 +191,11 @@ def admin_panel(request: Request):
     keys = cursor.fetchall()
     db.close()
     
-    rows_html = ""
+        rows_html = ""
     for k in keys:
         status_class = "tag-free" if k["status"] == "free" else "tag-active"
         status_text = "Свободен" if k["status"] == "free" else "Активирован"
-                rows_html += f"""
+        rows_html += f"""
         <tr>
             <td><code>{k["key_code"]}</code></td>
             <td><span class="{status_class}">{status_text}</span></td>
@@ -207,6 +207,7 @@ def admin_panel(request: Request):
             </td>
         </tr>
         """
+
 
         
     content = f"""
