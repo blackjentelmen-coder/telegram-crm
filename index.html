@@ -83,5 +83,44 @@
         </div>
     </div>
 
+    <!-- Скрипт отправки запросов на бэкенд -->
+    <script>
+        async function sendCommand(action, data = {}) {
+            try {
+                const response = await fetch(`/api/${action}`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(data)
+                });
+                const result = await response.json();
+                alert(`Результат: ${JSON.stringify(result)}`);
+            } catch (error) {
+                alert(`Ошибка соединения: ${error}`);
+            }
+        }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            const buttons = document.querySelectorAll('.action-btn');
+            
+            if (buttons.length > 0) {
+                buttons[0].addEventListener('click', () => {
+                    const inputs = document.querySelectorAll('.card input');
+                    const chatLink = inputs[0].value;
+                    const limit = inputs[1].value;
+                    sendCommand('parse', { chat: chatLink, limit: limit });
+                });
+            }
+
+            if (buttons.length > 1) {
+                buttons[1].addEventListener('click', () => {
+                    const inputs = document.querySelectorAll('.card input');
+                    const limitPerAcc = inputs[2].value;
+                    sendCommand('invite', { limit_per_account: limitPerAcc });
+                });
+            }
+        });
+    </script>
 </body>
 </html>
