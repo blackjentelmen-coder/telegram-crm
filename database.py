@@ -13,7 +13,8 @@ def init_db():
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             key_code TEXT NOT NULL,
             status TEXT DEFAULT 'free',
-            client_name TEXT DEFAULT NULL
+            client_name TEXT DEFAULT NULL,
+            note TEXT DEFAULT NULL
         )
     """)
     db.commit()
