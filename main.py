@@ -195,6 +195,7 @@ def admin_panel(request: Request):
     
     rows_html = ""
     for k in keys:
+        
         status_class = "tag-free" if k["status"] == "free" else "tag-active"
         status_text = "Свободен" if k["status"] == "free" else "Активирован"
         rows_html += f"""
