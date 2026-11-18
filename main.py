@@ -11,6 +11,11 @@ import uuid
 from telethon import TelegramClient
 from telethon.sessions import StringSession
 
+# Импортируем наши боевые модули GHOSTCORE
+import spammer
+import inviter
+import parser
+
 API_ID = 38977487
 API_HASH = "a6afb062a4c36f6d7b2cb87d27385672"
 
@@ -464,35 +469,95 @@ async def run_client_task(request: Request):
     if not active_accs:
         res_text = "Ошибка: Нет активных авторизованных аккаунтов!"
     else:
-        if task_type == "spammer":
-            targets = form.get("spam_targets", "").strip()
-            spam_mode = form.get("spam_mode", "text")
-            spam_order = form.get("spam_order", "sequential")
-            delay = form.get("spam_delay", "5")
-            limit = form.get("spam_limit", "20")
-            
-            if spam_mode == "text":
-                texts = form.getlist("spam_texts[]")
-                valid_texts = [t for t in texts if t.strip()]
-                res_text = f"Спамер [Текст]: постов: {len(valid_texts)}, порядок: {spam_order}, задержка: {delay}с, лимит: {limit}, аккаунтов: {len(active_accs)}."
-            else:
-                links = form.getlist("spam_links[]")
-                valid_links = [l for l in links if l.strip()]
-                res_text = f"Спамер [Репост]: ссылок: {len(valid_links)}, порядок: {spam_order}, задержка: {delay}с, лимит: {limit}, аккаунтов: {len(active_accs)}."
-                
-        elif task_type == "inviter":
-            sources = form.get("inviter_sources", "").strip()
-            target = form.get("inviter_target", "").strip()
-            limit = form.get("inviter_limit", "10")
-            delay = form.get("inviter_delay", "10")
-            res_text = f"Инвайтер запущен. Цель: {target}, лимит: {limit}, аккаунтов: {len(active_accs)}."
-            
-        elif task_type == "parser":
-            targets = form.get("parser_targets", "").strip()
-            mode = form.get("parser_mode", "active")
-            res_text = f"Парсер запущен. Режим: {mode}, аккаунтов: {len(active_accs)}."
+        # Поднимаем сессии Telethon для активных аккаунтов
+        clients = []
+        for acc in active_accs:
+            try:
+                client = TelegramClient(StringSession(acc["session_string"]), API_ID, API_HASH)
+                await client.connect()
+                if await client.is_user_authorized():
+                    clients.append(client)
+            except Exception as e:
+                print(f"⚠️ Ошибка инициализации клиента {acc['phone']}: {e}")
+
+        if not clients:
+            res_text = "Ошибка: Ни один из сохраненных аккаунтов не авторизован в Telegram!"
         else:
-            res_text = f"Задача '{task_type}' обработана."
+            try:
+                if task_type == "spammer":
+                    targets_raw = form.get("spam_targets", "").strip()
+                    targets = [t.strip() for t in targets_raw.split("\n") if t.strip()]
+                    target_type = form.get("target_type", "chats")
+                    spam_mode = form.get("spam_mode", "text")
+                    spam_order = form.get("spam_order", "sequential")
+                    delay_sec = int(form.get("spam_delay", 5))
+                    limit_per_account = int(form.get("spam_limit", 20))
+                    
+                    texts = form.getlist("spam_texts[]") if spam_mode == "text" else None
+                    forward_links = form.getlist("spam_links[]") if spam_mode == "forward" else None
+
+                    res = await spammer.run_spammer(
+                        clients=clients,
+                        targets=targets,
+                        target_type=target_type,
+                        spam_mode=spam_mode,
+                        spam_order=spam_order,
+                        texts=texts,
+                        forward_links=forward_links,
+                        limit_per_account=limit_per_account,
+                        delay_sec=delay_sec
+                    )
+                    res_text = f"Спамер завершен. Успешно: {res.get('success', 0)}, Ошибок: {res.get('failed', 0)}, FloodWait: {res.get('flood_wait', 0)}"
+
+                elif task_type == "inviter":
+                    target_chat = form.get("inviter_target", "").strip()
+                    sources_raw = form.get("inviter_sources", "").strip()
+                    sources = [s.strip() for s in sources_raw.split("\n") if s.strip()] if sources_raw else None
+                    
+                    direct_users_raw = form.get("inviter_direct_users", "").strip()
+                    direct_users = [u.strip() for u in direct_users_raw.split("\n") if u.strip()] if direct_users_raw else None
+                    
+                    limit_per_account = int(form.get("inviter_limit", 10))
+                    delay_min = int(form.get("inviter_delay_min", 10))
+                    delay_max = int(form.get("inviter_delay_max", 20))
+
+                    res = await inviter.run_inviter(
+                        clients=clients,
+                        target_chat=target_chat,
+                        sources=sources,
+                        direct_users=direct_users,
+                        limit_per_account=limit_per_account,
+                        delay_min=delay_min,
+                        delay_max=delay_max
+                    )
+                    res_text = f"Инвайтер завершен. Добавлено: {res.get('success', 0)}, Ошибок: {res.get('failed', 0)}, FloodWait: {res.get('flood_wait', 0)}"
+
+                elif task_type == "parser":
+                    targets_raw = form.get("parser_targets", "").strip()
+                    targets = [t.strip() for t in targets_raw.split("\n") if t.strip()]
+                    parser_mode = form.get("parser_mode", "active")
+                    parser_limit = int(form.get("parser_limit", 500))
+
+                    res = await parser.run_parser(
+                        clients=clients,
+                        targets=targets,
+                        parser_mode=parser_mode,
+                        limit=parser_limit
+                    )
+                    parsed_users = res.get("users", [])
+                    res_text = f"Парсер завершен. Собрано уникальных пользователей: {len(parsed_users)}. Успешно чатов: {res.get('success', 0)}"
+                else:
+                    res_text = f"Неизвестный тип задачи: {task_type}"
+
+            except Exception as e:
+                res_text = f"Ошибка выполнения задачи: {str(e)}"
+            
+            # Корректно отключаем клиенты после выполнения
+            for client in clients:
+                try:
+                    await client.disconnect()
+                except:
+                    pass
         
     cursor.execute(
         "INSERT INTO client_tasks (client_key, task_type, target_link, result_text) VALUES (?, ?, ?, ?)",
