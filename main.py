@@ -27,13 +27,15 @@ def client_home(request: Request, error: str = None):
     if request.cookies.get("client_session"):
         return RedirectResponse(url="/cabinet", status_code=303)
         
-    err_html = f'<div style="color: #ff1e42; margin-bottom: 15px; text-align: center; font-size: 13px;">{error}</div>' if error else ""
+    err_html = f'<div style="color: #ff1e42; margin-bottom: 10px; text-align: center; font-size: 12px;">{error}</div>' if error else ""
     
     return f"""
     <!DOCTYPE html>
     <html lang="ru">
     <head>
-        <meta charset="UTF-8"><title>GHOSTCORE | Вход</title>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>GHOSTCORE | Вход</title>
         <style>
             :root {{
                 --bg-color: #050507;
@@ -44,20 +46,20 @@ def client_home(request: Request, error: str = None):
                 --text-main: #f3f4f6;
                 --text-muted: #9ca3af;
             }}
-            body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: var(--bg-color); color: var(--text-main); display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }}
-            .card {{ background: var(--card-bg); border: 1px solid var(--border-color); padding: 30px; border-radius: 14px; width: 340px; box-shadow: 0 4px 20px rgba(0, 0, 0, 0.7); box-sizing: border-box; }}
-            h2 {{ text-align: center; margin-top: 0; font-size: 16px; text-transform: uppercase; letter-spacing: 1px; color: var(--neon-red); }}
-            input {{ width: 100%; padding: 12px; margin: 8px 0; background: #050507; border: 1px solid var(--border-color); color: white; border-radius: 8px; box-sizing: border-box; outline: none; font-size: 14px; }}
-            input:focus {{ border-color: var(--neon-red); box-shadow: 0 0 8px var(--neon-red-glow); }}
-            button {{ width: 100%; padding: 12px; background: linear-gradient(135deg, #cc1433, #ff1e42); color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; margin-top: 8px; text-transform: uppercase; font-size: 13px; letter-spacing: 0.5px; box-shadow: 0 0 12px var(--neon-red-glow); }}
+            body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: var(--bg-color); color: var(--text-main); display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; padding: 15px; box-sizing: border-box; }}
+            .card {{ background: var(--card-bg); border: 1px solid var(--border-color); padding: 20px; border-radius: 12px; width: 100%; max-width: 320px; box-shadow: 0 4px 20px rgba(0, 0, 0, 0.7); box-sizing: border-box; }}
+            h2 {{ text-align: center; margin-top: 0; margin-bottom: 15px; font-size: 15px; text-transform: uppercase; letter-spacing: 1.5px; color: var(--neon-red); }}
+            input {{ width: 100%; padding: 10px 12px; margin: 6px 0; background: #050507; border: 1px solid var(--border-color); color: white; border-radius: 6px; box-sizing: border-box; outline: none; font-size: 13px; }}
+            input:focus {{ border-color: var(--neon-red); box-shadow: 0 0 6px var(--neon-red-glow); }}
+            button {{ width: 100%; padding: 10px; background: linear-gradient(135deg, #cc1433, #ff1e42); color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: bold; margin-top: 6px; text-transform: uppercase; font-size: 12px; letter-spacing: 0.5px; box-shadow: 0 0 10px var(--neon-red-glow); }}
             button:active {{ transform: scale(0.98); }}
             .btn-alt {{ background: #111b15 !important; color: #10b981 !important; border: 1px solid #064e3b !important; box-shadow: none !important; }}
-            .divider {{ text-align: center; margin: 15px 0; color: var(--text-muted); font-size: 11px; text-transform: uppercase; letter-spacing: 1px; }}
+            .divider {{ text-align: center; margin: 12px 0; color: var(--text-muted); font-size: 10px; text-transform: uppercase; letter-spacing: 1px; }}
         </style>
     </head>
     <body>
         <div class="card">
-            <h2>GHOSTCORE CRM</h2>
+            <h2>GHOSTCORE</h2>
             {err_html}
             
             <form action="/login" method="POST">
@@ -155,7 +157,9 @@ async def start_qr_auth(request: Request):
         <!DOCTYPE html>
         <html lang="ru">
         <head>
-            <meta charset="UTF-8"><title>GHOSTCORE | QR Авторизация</title>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>GHOSTCORE | QR</title>
             <meta http-equiv="refresh" content="5">
             <style>
                 :root {{
@@ -167,80 +171,23 @@ async def start_qr_auth(request: Request):
                     --text-main: #f3f4f6;
                     --text-muted: #9ca3af;
                 }}
-                body {{ 
-                    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; 
-                    background: var(--bg-color); 
-                    color: var(--text-main); 
-                    display: flex; 
-                    justify-content: center; 
-                    align-items: center; 
-                    height: 100vh; 
-                    margin: 0; 
-                }}
-                .card {{ 
-                    background: var(--card-bg); 
-                    border: 1px solid var(--border-color);
-                    padding: 25px; 
-                    border-radius: 14px; 
-                    width: 320px; 
-                    text-align: center; 
-                    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.7); 
-                }}
-                h3 {{ 
-                    margin-top: 0; 
-                    font-size: 15px; 
-                    color: var(--text-main); 
-                    letter-spacing: 0.5px; 
-                    text-transform: uppercase; 
-                }}
-                img {{ 
-                    background: white; 
-                    padding: 10px; 
-                    border-radius: 8px; 
-                    margin: 15px 0; 
-                    width: 180px; 
-                    height: 180px; 
-                }}
-                .btn-action {{ 
-                    background: linear-gradient(135deg, #cc1433, #ff1e42);
-                    color: white; 
-                    border: none; 
-                    padding: 10px; 
-                    width: 100%; 
-                    border-radius: 8px; 
-                    cursor: pointer; 
-                    font-weight: bold; 
-                    font-size: 13px; 
-                    text-transform: uppercase;
-                    letter-spacing: 0.5px;
-                    box-shadow: 0 0 12px var(--neon-red-glow);
-                    text-decoration: none;
-                    display: inline-block;
-                    box-sizing: border-box;
-                    margin-top: 10px;
-                }}
-                .btn-back {{ 
-                    display: inline-block; 
-                    margin-top: 15px; 
-                    color: var(--text-muted); 
-                    text-decoration: none; 
-                    font-size: 12px; 
-                    text-transform: uppercase;
-                    letter-spacing: 0.5px;
-                }}
-                .btn-back:hover {{
-                    color: var(--text-main);
-                }}
+                body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: var(--bg-color); color: var(--text-main); display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; padding: 15px; box-sizing: border-box; }}
+                .card {{ background: var(--card-bg); border: 1px solid var(--border-color); padding: 20px; border-radius: 12px; width: 100%; max-width: 300px; text-align: center; box-shadow: 0 4px 20px rgba(0, 0, 0, 0.7); box-sizing: border-box; }}
+                h3 {{ margin-top: 0; margin-bottom: 10px; font-size: 14px; color: var(--text-main); letter-spacing: 0.5px; text-transform: uppercase; }}
+                img {{ background: white; padding: 8px; border-radius: 6px; margin: 10px 0; width: 160px; height: 160px; }}
+                .btn-action {{ background: linear-gradient(135deg, #cc1433, #ff1e42); color: white; border: none; padding: 10px; width: 100%; border-radius: 6px; cursor: pointer; font-weight: bold; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; box-shadow: 0 0 10px var(--neon-red-glow); text-decoration: none; display: inline-block; box-sizing: border-box; margin-top: 8px; }}
+                .btn-back {{ display: inline-block; margin-top: 12px; color: var(--text-muted); text-decoration: none; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; }}
+                .btn-back:hover {{ color: var(--text-main); }}
             </style>
         </head>
         <body>
             <div class="card">
                 <h3>Вход по QR-коду</h3>
-                <p style="font-size: 11px; color: var(--text-muted); text-transform: uppercase; line-height: 1.4;">
+                <p style="font-size: 10px; color: var(--text-muted); text-transform: uppercase; line-height: 1.3; margin-bottom: 10px;">
                     Откройте Telegram:<br><b style="color: var(--text-main);">Настройки → Устройства → Подключить</b>
                 </p>
                 <img src="data:image/png;base64,{img_str}" alt="QR Code">
-                <p style="font-size: 11px; color: var(--neon-red); text-transform: uppercase; letter-spacing: 1px; font-weight: bold;">Ожидание сканирования...</p>
+                <p style="font-size: 10px; color: var(--neon-red); text-transform: uppercase; letter-spacing: 1px; font-weight: bold; margin: 8px 0;">Ожидание сканирования...</p>
                 <a href="/cabinet/check-qr?sid={session_id}" class="btn-action">Проверить вход</a>
                 <br>
                 <a href="/cabinet" class="btn-back">← Назад в кабинет</a>
@@ -324,6 +271,7 @@ async def verify_client_code(request: Request, acc_id: int = Form(...), code: st
         return RedirectResponse(url="/", status_code=303)
         
     db = get_db()
+    cursor = db.dict_factory if hasattr(db, 'dict_factory') else get_db() # сохраняем совместимость
     cursor = db.cursor()
     cursor.execute("SELECT * FROM client_tg_accounts WHERE id = ? AND client_key = ?", (acc_id, client_key))
     acc = cursor.fetchone()
@@ -386,7 +334,7 @@ def run_client_task(request: Request, task_type: str = Form(...), target_link: s
         
     cursor.execute(
         "INSERT INTO client_tasks (client_key, task_type, target_link, result_text) VALUES (?, ?, ?, ?)",
-        (client_key, task_type, target_link.strip(), res_text)
+        (client_key, task_type, target_link.strip() if target_link else "", res_text)
     )
     db.commit()
     db.close()
