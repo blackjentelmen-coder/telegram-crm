@@ -187,9 +187,11 @@ def admin_panel(request: Request):
         
     conn = get_db()
     cursor = conn.cursor()
+        db = get_db()
+    cursor = db.cursor()
     cursor.execute("SELECT * FROM access_keys ORDER BY id DESC")
     keys = cursor.fetchall()
-    conn.close()
+    db.close()
     
     rows_html = ""
     for k in keys:
