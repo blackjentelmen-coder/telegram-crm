@@ -1,125 +1,58 @@
-import os
-import sqlite3
-from telethon import TelegramClient
-from telethon.sessions import StringSession
-from telethon.errors import ChatAdminRequiredError, ChannelPrivateError
+import re
+from typing import Dict, Any, Optional
 
-API_ID = 38977487
-API_HASH = "a6afb062a4c36f6d7b2cb87d27385672"
-DB_FILE = "crm_database.db"
+def parse_telegram_link(link: str) -> Optional[Dict[str, Any]]:
+    """
+    Распознает и разбирает все типы ссылок Telegram:
+    - Публичные каналы/чаты
+    - Приватные инвайт-ссылки (+hash или joinchat/hash)
+    - Ссылки на конкретные сообщения (в публичных и приватных чатах)
+    """
+    link = link.strip()
+    
+    # 1. Обработка юзернейма в чистом виде (например, @durov)
+    if link.startswith('@'):
+        return {
+            "type": "public_chat",
+            "identifier": link[1:],
+            "message_id": None
+        }
 
-class TelegramParser:
-    def __init__(self, session_string: str = None):
-        self.session = StringSession(session_string) if session_string else StringSession()
-        self.client = TelegramClient(self.session, API_ID, API_HASH)
+    # 2. Шаблоны для ссылок t.me / telegram.me
+    # Приватная инвайт-ссылка со знаком плюс: t.me/+hash или t.me/joinchat/hash
+    private_invite_match = re.search(r'(?:t\.me|telegram\.me)/(?:\+|joinchat/)([a-zA-Z0-9_\-]+)', link)
+    if private_invite_match:
+        return {
+            "type": "private_invite",
+            "identifier": private_invite_match.group(1),
+            "message_id": None
+        }
 
-    async def connect(self):
-        if not self.client.is_connected():
-            await self.client.connect()
+    # Ссылка на конкретное сообщение в супергруппе/канале с ID: t.me/c/1234567890/555
+    msg_c_match = re.search(r'(?:t\.me|telegram\.me)/c/(\d+)/(\d+)', link)
+    if msg_c_match:
+        return {
+            "type": "message_c",
+            "chat_id": int("-100" + msg_c_match.group(1)), # Телеграм требует -100 для супергрупп
+            "message_id": int(msg_c_match.group(2))
+        }
 
-    async def disconnect(self):
-        if self.client.is_connected():
-            await self.client.disconnect()
+    # Ссылка на сообщение в публичном чате: t.me/username/555
+    msg_public_match = re.search(r'(?:t\.me|telegram\.me)/([a-zA-Z0-9_]+)/(\d+)', link)
+    if msg_public_match:
+        return {
+            "type": "message_public",
+            "identifier": msg_public_match.group(1),
+            "message_id": int(msg_public_match.group(2))
+        }
 
-    async def parse_chat_members(self, target: str, user_id: int, limit_messages: int = 5000):
-        """
-        Универсальный парсер:
-        - target: ссылка на чат, канал или сообщение.
-        - limit_messages: глубина анализа истории сообщений, если список участников скрыт (5000, 10000, 20000).
-        """
-        await self.connect()
-        parsed_users = {}
+    # Обычная ссылка на публичный чат/канал: t.me/username
+    public_match = re.search(r'(?:t\.me|telegram\.me)/([a-zA-Z0-9_]+)', link)
+    if public_match:
+        return {
+            "type": "public_chat",
+            "identifier": public_match.group(1),
+            "message_id": None
+        }
 
-        try:
-            # 1. Проверяем, является ли ссылка ссылкой на конкретное сообщение
-            if "/c/" in target or (target.count("/") >= 4 and "+" not in target):
-                parts = target.split("/")
-                post_id = int(parts[-1])
-                chat_identifier = parts[-2] if "c" not in parts else int(f"-100{parts[parts.index('c') + 1]}")
-                
-                message = await self.client.get_message(chat_identifier, post_id)
-                if message and message.sender:
-                    user = message.sender
-                    parsed_users[user.id] = {
-                        "id": user.id,
-                        "username": getattr(user, "username", None),
-                        "first_name": getattr(user, "first_name", ""),
-                        "phone": getattr(user, "phone", None)
-                    }
-                
-                # Собираем комментарии к посту
-                try:
-                    async for comment in self.client.iter_messages(chat_identifier, reply_to=post_id):
-                        if comment.sender and not comment.sender.bot:
-                            u = comment.sender
-                            parsed_users[u.id] = {
-                                "id": u.id,
-                                "username": getattr(u, "username", None),
-                                "first_name": getattr(u, "first_name", ""),
-                                "phone": getattr(u, "phone", None)
-                            }
-                except Exception:
-                    pass
-
-            else:
-                # 2. Обычный чат / канал (публичный или закрытый)
-                entity = await self.client.get_entity(target)
-                
-                # Пытаемся собрать участников напрямую
-                try:
-                    async for user in self.client.iter_participants(entity):
-                        if not user.bot:
-                            parsed_users[user.id] = {
-                                "id": user.id,
-                                "username": getattr(user, "username", None),
-                                "first_name": getattr(user, "first_name", ""),
-                                "phone": getattr(user, "phone", None)
-                            }
-                except (ChatAdminRequiredError, ChannelPrivateError, Exception):
-                    # Если список участников скрыт, переключаемся на парсинг по истории сообщений
-                    async for message in self.client.iter_messages(entity, limit=limit_messages):
-                        if message.sender and not message.sender.bot:
-                            user = message.sender
-                            if user.id not in parsed_users:
-                                parsed_users[user.id] = {
-                                    "id": user.id,
-                                    "username": getattr(user, "username", None),
-                                    "first_name": getattr(user, "first_name", ""),
-                                    "phone": getattr(user, "phone", None)
-                                }
-
-            users_list = list(parsed_users.values())
-            self.save_to_db(users_list, user_id)
-            return {"success": True, "count": len(users_list), "users": users_list}
-
-        except Exception as e:
-            return {"success": False, "error": str(e)}
-        finally:
-            await self.disconnect()
-
-    def save_to_db(self, users_list, user_id: int):
-        """Сохранение спарсенных пользователей в локальную БД"""
-        conn = sqlite3.connect(DB_FILE)
-        cursor = conn.cursor()
-        
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS parsed_audience (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id INTEGER,
-                tg_id TEXT,
-                username TEXT,
-                first_name TEXT,
-                phone TEXT,
-                UNIQUE(user_id, tg_id)
-            )
-        """)
-        
-        for u in users_list:
-            cursor.execute(
-                """INSERT OR IGNORE INTO parsed_audience (user_id, tg_id, username, first_name, phone) 
-                   VALUES (?, ?, ?, ?, ?)""",
-                (user_id, str(u["id"]), u["username"], u["first_name"], u["phone"])
-            )
-        
-        conn.commit()
-        conn.close()
+    return None # Если формат не распознан
