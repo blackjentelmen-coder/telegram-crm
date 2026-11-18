@@ -1,397 +1,338 @@
 import sqlite3
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import HTMLResponse
-from pydantic import BaseModel
+import secrets
+from datetime import datetime
+from fastapi import FastAPI, Form, Request, Response, HTTPException
+from fastapi.responses import HTMLResponse, RedirectResponse
 
-app = FastAPI(title="Telegram CRM Full Lite")
+app = FastAPI(title="Telegram CRM", version="2.0")
+
 DB_FILE = "crm.db"
 
-
+# Инициализация базы данных
 def init_db():
-  conn = sqlite3.connect(DB_FILE)
-  cursor = conn.cursor()
-
-  # 1. Таблица ключей доступа
-  cursor.execute("""
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    # Таблица ключей доступа пользователей
+    cursor.execute("""
         CREATE TABLE IF NOT EXISTS access_keys (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            access_key TEXT UNIQUE NOT NULL,
-            tier TEXT DEFAULT 'light'
+            key_code TEXT UNIQUE NOT NULL,
+            status TEXT DEFAULT 'free',
+            created_at TEXT,
+            activated_at TEXT
         )
     """)
-
-  # 2. Таблица привязанных Telegram-аккаунтов
-  cursor.execute("""
-        CREATE TABLE IF NOT EXISTS telegram_accounts (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            phone TEXT UNIQUE NOT NULL,
-            status TEXT DEFAULT 'active',
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    # Таблица настроек (админ-пароль)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS admin_config (
+            key TEXT PRIMARY KEY,
+            value TEXT
         )
     """)
-
-  # 3. Таблица задач / рассылок
-  cursor.execute("""
-        CREATE TABLE IF NOT EXISTS tasks (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            title TEXT NOT NULL,
-            message TEXT NOT NULL,
-            status TEXT DEFAULT 'pending'
-        )
-    """)
-
-  conn.commit()
-  conn.close()
-
-
-@app.on_event("startup")
-def startup_event():
-  init_db()
-
-
-# Схемы запросов
-class KeyRequest(BaseModel):
-  access_key: str
-
-
-class AccountRequest(BaseModel):
-  phone: str
-  access_key: str
-
-
-class TaskRequest(BaseModel):
-  title: str
-  message: str
-  access_key: str
-
-
-# Эндпоинты проверки и настройки
-@app.get("/api/status")
-def get_status():
-  conn = sqlite3.connect(DB_FILE)
-  cursor = conn.cursor()
-  cursor.execute("SELECT COUNT(*) FROM access_keys")
-  count = cursor.fetchone()[0]
-  conn.close()
-  return {"has_keys": count > 0}
-
-
-@app.post("/api/setup")
-def setup_key(data: KeyRequest):
-  conn = sqlite3.connect(DB_FILE)
-  cursor = conn.cursor()
-  cursor.execute("SELECT COUNT(*) FROM access_keys")
-  if cursor.fetchone()[0] > 0:
-    conn.close()
-    raise HTTPException(status_code=400, detail="Ключ уже настроен")
-  if not data.access_key.strip():
-    conn.close()
-    raise HTTPException(status_code=400, detail="Ключ не может быть пустым")
-  try:
-    cursor.execute(
-        "INSERT INTO access_keys (access_key, tier) VALUES (?, ?)",
-        (data.access_key.strip(), "light"),
-    )
+    # Установка дефолтного пароля админа, если его нет (по умолчанию: admin123)
+    cursor.execute("SELECT value FROM admin_config WHERE key='admin_pass'")
+    if not cursor.fetchone():
+        cursor.execute("INSERT INTO admin_config (key, value) VALUES ('admin_pass', 'admin123')")
+    
     conn.commit()
-  except sqlite3.IntegrityError:
     conn.close()
-    raise HTTPException(status_code=400, detail="Такой ключ уже существует")
-  conn.close()
-  return {"success": True}
 
+init_db()
 
-@app.post("/auth/verify")
-def verify_key(data: KeyRequest):
-  conn = sqlite3.connect(DB_FILE)
-  cursor = conn.cursor()
-  cursor.execute(
-      "SELECT tier FROM access_keys WHERE access_key = ?", (data.access_key,)
-  )
-  row = cursor.fetchone()
-  conn.close()
-  if not row:
-    raise HTTPException(status_code=403, detail="Неверный ключ доступа")
-  return {"success": True, "tier": row[0]}
+def get_db():
+    conn = sqlite3.connect(DB_FILE)
+    conn.row_factory = sqlite3.Row
+    return conn
 
-
-# Управление аккаунтами
-@app.get("/accounts/list")
-def list_accounts(access_key: str):
-  conn = sqlite3.connect(DB_FILE)
-  cursor = conn.cursor()
-  cursor.execute(
-      "SELECT 1 FROM access_keys WHERE access_key = ?", (access_key,)
-  )
-  if not cursor.fetchone():
-    conn.close()
-    raise HTTPException(status_code=403, detail="Неверный ключ")
-
-  cursor.execute("SELECT id, phone, status, created_at FROM telegram_accounts")
-  rows = cursor.fetchall()
-  conn.close()
-  return [
-      {"id": r[0], "phone": r[1], "status": r[2], "created_at": r[3]}
-      for r in rows
-  ]
-
-
-@app.post("/accounts/add")
-def add_account(data: AccountRequest):
-  conn = sqlite3.connect(DB_FILE)
-  cursor = conn.cursor()
-  cursor.execute(
-      "SELECT 1 FROM access_keys WHERE access_key = ?", (data.access_key,)
-  )
-  if not cursor.fetchone():
-    conn.close()
-    raise HTTPException(status_code=403, detail="Неверный ключ доступа")
-  try:
-    cursor.execute(
-        "INSERT INTO telegram_accounts (phone) VALUES (?)", (data.phone,)
-    )
+# Генерация уникальных ключей
+def generate_keys_batch(count=20):
+    conn = get_db()
+    cursor = conn.cursor()
+    alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789" # Исключены похожие символы (O, 0, I, 1)
+    
+    for _ in range(count):
+        while True:
+            p1 = "".join(secrets.choice(alphabet) for _ in range(4))
+            p2 = "".join(secrets.choice(alphabet) for _ in range(4))
+            p3 = "".join(secrets.choice(alphabet) for _ in range(4))
+            key_code = f"CRM-{p1}-{p2}-{p3}"
+            
+            cursor.execute("SELECT id FROM access_keys WHERE key_code = ?", (key_code,))
+            if not cursor.fetchone():
+                cursor.execute(
+                    "INSERT INTO access_keys (key_code, status, created_at) VALUES (?, 'free', ?)",
+                    (key_code, datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+                )
+                break
     conn.commit()
-  except sqlite3.IntegrityError:
     conn.close()
-    return {"success": False, "message": "Этот номер уже привязан"}
-  conn.close()
-  return {"success": True, "message": f"Аккаунт {data.phone} добавлен"}
 
+# --- СТИЛИ ДИЗАЙНА (Cyberpunk Dark UI) ---
+BASE_STYLE = """
+<style>
+    :root {
+        --bg: #0b0f19;
+        --card-bg: #131c2e;
+        --accent: #00ffcc;
+        --accent-hover: #00cca3;
+        --danger: #ff4757;
+        --text: #f1f2f6;
+        --text-muted: #a4b0be;
+        --border: #1f2937;
+    }
+    body {
+        background-color: var(--bg);
+        color: var(--text);
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        margin: 0;
+        padding: 20px;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        min-height: 90vh;
+    }
+    .container {
+        width: 100%;
+        max-width: 480px;
+        background: var(--card-bg);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 24px;
+        box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+    }
+    h2, h3 { color: var(--accent); margin-top: 0; }
+    input, button {
+        width: 100%;
+        padding: 12px;
+        margin-top: 10px;
+        margin-bottom: 15px;
+        background: var(--bg);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        color: var(--text);
+        font-size: 16px;
+        box-sizing: border-box;
+    }
+    input:focus {
+        border-color: var(--accent);
+        outline: none;
+    }
+    button {
+        background: var(--accent);
+        color: #0b0f19;
+        font-weight: bold;
+        cursor: pointer;
+        border: none;
+        transition: background 0.2s;
+    }
+    button:hover { background: var(--accent-hover); }
+    .btn-danger { background: var(--danger); color: white; }
+    .error { color: var(--danger); font-size: 14px; margin-bottom: 10px; }
+    .success { color: var(--accent); font-size: 14px; margin-bottom: 10px; }
+    table { width: 100%; border-collapse: collapse; margin-top: 15px; font-size: 14px; }
+    th, td { padding: 10px; border-bottom: 1px solid var(--border); text-align: left; }
+    th { color: var(--text-muted); }
+    .tag-free { color: var(--accent); }
+    .tag-active { color: #ffa502; }
+    .back-link { display: inline-block; margin-top: 15px; color: var(--text-muted); text-decoration: none; font-size: 14px; }
+    .back-link:hover { color: var(--text); }
+</style>
+"""
 
-@app.post("/accounts/delete")
-def delete_account(account_id: int, access_key: str):
-  conn = sqlite3.connect(DB_FILE)
-  cursor = conn.cursor()
-  cursor.execute(
-      "SELECT 1 FROM access_keys WHERE access_key = ?", (access_key,)
-  )
-  if not cursor.fetchone():
-    conn.close()
-    raise HTTPException(status_code=403, detail="Неверный ключ")
-  cursor.execute("DELETE FROM telegram_accounts WHERE id = ?", (account_id,))
-  conn.commit()
-  conn.close()
-  return {"success": True}
-
-
-# Управление задачами / рассылками
-@app.get("/tasks/list")
-def list_tasks(access_key: str):
-  conn = sqlite3.connect(DB_FILE)
-  cursor = conn.cursor()
-  cursor.execute(
-      "SELECT 1 FROM access_keys WHERE access_key = ?", (access_key,)
-  )
-  if not cursor.fetchone():
-    conn.close()
-    raise HTTPException(status_code=403, detail="Неверный ключ")
-
-  cursor.execute("SELECT id, title, message, status FROM tasks")
-  rows = cursor.fetchall()
-  conn.close()
-  return [
-      {"id": r[0], "title": r[1], "message": r[2], "status": r[3]} for r in rows
-  ]
-
-
-@app.post("/tasks/add")
-def add_task(data: TaskRequest):
-  conn = sqlite3.connect(DB_FILE)
-  cursor = conn.cursor()
-  cursor.execute(
-      "SELECT 1 FROM access_keys WHERE access_key = ?", (data.access_key,)
-  )
-  if not cursor.fetchone():
-    conn.close()
-    raise HTTPException(status_code=403, detail="Неверный ключ")
-  cursor.execute(
-      "INSERT INTO tasks (title, message) VALUES (?, ?)",
-      (data.title, data.message),
-  )
-  conn.commit()
-  conn.close()
-  return {"success": True, "message": "Задача создана"}
-
-
-# Мобильный интерфейс (скелет без стилей, только функционал)
+# --- 1. КЛИЕНТСКИЙ ВХОД ( / ) ---
 @app.get("/", response_class=HTMLResponse)
-def mobile_ui():
-  return """
+def user_login_page(error: str = None):
+    err_html = f'<div class="error">{error}</div>' if error else ''
+    return f"""
     <!DOCTYPE html>
     <html lang="ru">
-    <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Telegram CRM Lite</title>
-        <style>
-            body { font-family: monospace; background: #111; color: #eee; padding: 10px; margin: 0; }
-            .card { background: #222; border: 1px solid #441; padding: 12px; margin-bottom: 10px; }
-            input, button, textarea { width: 100%; padding: 10px; margin-top: 5px; background: #000; color: #0f0; border: 1px solid #555; box-sizing: border-box; }
-            button { background: #224; color: #fff; cursor: pointer; }
-            hr { border-color: #444; }
-            .error { color: #f55; }
-            .success { color: #5f5; }
-        </style>
-    </head>
+    <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Telegram CRM - Вход</title>{BASE_STYLE}</head>
     <body>
-        <h2>TG CRM (Functional Core)</h2>
-
-        <!-- Настройка -->
-        <div class="card" id="setup-card" style="display:none;">
-            <h3>1. Первичная настройка</h3>
-            <input type="text" id="masterKeyInput" placeholder="Придумайте мастер-ключ">
-            <button onclick="doSetup()">Установить ключ</button>
-            <div id="setup-msg"></div>
-        </div>
-
-        <!-- Вход -->
-        <div class="card" id="auth-card" style="display:none;">
-            <h3>Авторизация</h3>
-            <input type="password" id="authKeyInput" placeholder="Введите мастер-ключ">
-            <button onclick="doAuth()">Войти</button>
-            <div id="auth-msg"></div>
-        </div>
-
-        <!-- Основная панель -->
-        <div id="app-content" style="display:none;">
-            <div class="card">
-                <h3>Управление аккаунтами</h3>
-                <input type="text" id="phoneInput" placeholder="Телефон (+380...)">
-                <button onclick="addAccount()">Добавить аккаунт</button>
-                <div id="acc-msg"></div>
-                <hr>
-                <div id="accountsList">Загрузка аккаунтов...</div>
-            </div>
-
-            <div class="card">
-                <h3>Задачи / Рассылки</h3>
-                <input type="text" id="taskTitle" placeholder="Название задачи">
-                <textarea id="taskMsg" placeholder="Текст сообщения"></textarea>
-                <button onclick="addTask()">Создать задачу</button>
-                <div id="task-msg"></div>
-                <hr>
-                <div id="tasksList">Загрузка задач...</div>
+        <div class="container">
+            <h2>Telegram CRM</h2>
+            <p style="color: var(--text-muted);">Введите ваш персональный ключ доступа для входа в систему.</p>
+            {err_html}
+            <form action="/auth" method="POST">
+                <input type="text" name="key_code" placeholder="CRM-XXXX-XXXX-XXXX" required autocomplete="off">
+                <button type="submit">Войти в систему</button>
+            </form>
+            <div style="margin-top: 20px; text-align: center;">
+                <a href="/admin/login" class="back-link">🔑 Вход в панель администратора</a>
             </div>
         </div>
-
-        <script>
-            document.addEventListener("DOMContentLoaded", () => {
-                fetch('/api/status').then(res => res.json()).then(data => {
-                    if (!data.has_keys) {
-                        document.getElementById("setup-card").style.display = 'block';
-                    } else {
-                        const saved = localStorage.getItem("crm_key");
-                        if (saved) {
-                            verifyAndOpen(saved);
-                        } else {
-                            document.getElementById("auth-card").style.display = 'block';
-                        }
-                    }
-                });
-            });
-
-            function doSetup() {
-                const key = document.getElementById("masterKeyInput").value.trim();
-                if (!key) return;
-                fetch('/api/setup', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({access_key: key})
-                }).then(res => res.json()).then(data => {
-                    if (data.success) {
-                        localStorage.setItem("crm_key", key);
-                        location.reload();
-                    } else {
-                        document.getElementById("setup-msg").innerHTML = '<span class="error">Ошибка</span>';
-                    }
-                });
-            }
-
-            function doAuth() {
-                const key = document.getElementById("authKeyInput").value.trim();
-                if (!key) return;
-                verifyAndOpen(key);
-            }
-
-            function verifyAndOpen(key) {
-                fetch('/auth/verify', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({access_key: key})
-                }).then(res => res.json()).then(data => {
-                    if (data.success) {
-                        localStorage.setItem("crm_key", key);
-                        document.getElementById("setup-card").style.display = 'none';
-                        document.getElementById("auth-card").style.display = 'none';
-                        document.getElementById("app-content").style.display = 'block';
-                        loadData();
-                    } else {
-                        document.getElementById("auth-msg").innerHTML = '<span class="error">Неверный ключ</span>';
-                        document.getElementById("auth-card").style.display = 'block';
-                    }
-                });
-            }
-
-            function loadData() {
-                const key = localStorage.getItem("crm_key");
-                
-                // Загрузка аккаунтов
-                fetch('/accounts/list?access_key=' + encodeURIComponent(key))
-                .then(res => res.json()).then(accounts => {
-                    let html = '';
-                    accounts.forEach(acc => {
-                        html += `<div>📱 ${acc.phone} [${acc.status}] <button onclick="delAcc(${acc.id})" style="width:auto;padding:2px 6px;">X</button></div>`;
-                    });
-                    document.getElementById("accountsList").innerHTML = html || 'Нет аккаунтов';
-                });
-
-                // Загрузка задач
-                fetch('/tasks/list?access_key=' + encodeURIComponent(key))
-                .then(res => res.json()).then(tasks => {
-                    let html = '';
-                    tasks.forEach(t => {
-                        html += `<div>📌 <b>${t.title}</b>: ${t.message} (${t.status})</div>`;
-                    });
-                    document.getElementById("tasksList").innerHTML = html || 'Нет задач';
-                });
-            }
-
-            function addAccount() {
-                const key = localStorage.getItem("crm_key");
-                const phone = document.getElementById("phoneInput").value.trim();
-                if (!phone) return;
-                fetch('/accounts/add', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({access_key: key, phone: phone})
-                }).then(res => res.json()).then(data => {
-                    document.getElementById("acc-msg").innerHTML = `<span class="${data.success ? 'success':'error'}">${data.message}</span>`;
-                    if (data.success) { document.getElementById("phoneInput").value = ''; loadData(); }
-                });
-            }
-
-            function delAcc(id) {
-                const key = localStorage.getItem("crm_key");
-                fetch(`/accounts/delete?account_id=${id}&access_key=` + encodeURIComponent(key), {method: 'POST'})
-                .then(() => loadData());
-            }
-
-            function addTask() {
-                const key = localStorage.getItem("crm_key");
-                const title = document.getElementById("taskTitle").value.trim();
-                const message = document.getElementById("taskMsg").value.trim();
-                if (!title || !message) return;
-                fetch('/tasks/add', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({access_key: key, title: title, message: message})
-                }).then(res => res.json()).then(data => {
-                    document.getElementById("task-msg").innerHTML = `<span class="success">${data.message}</span>`;
-                    document.getElementById("taskTitle").value = '';
-                    document.getElementById("taskMsg").value = '';
-                    loadData();
-                });
-            }
-        </script>
     </body>
     </html>
     """
+
+@app.post("/auth")
+def user_authenticate(key_code: str = Form(...)):
+    conn = get_db()
+    cursor = conn.cursor()
+    code = key_code.strip()
+    
+    cursor.execute("SELECT * FROM access_keys WHERE key_code = ?", (code,))
+    row = cursor.fetchone()
+    
+    if not row:
+        conn.close()
+        return RedirectResponse(url="/?error=Неверный ключ доступа", status_code=303)
+    
+    # Если ключ свободен, активируем его
+    if row["status"] == "free":
+        cursor.execute(
+            "UPDATE access_keys SET status = 'active', activated_at = ? WHERE key_code = ?",
+            (datetime.now().strftime("%Y-%m-%d %H:%M:%S"), code)
+        )
+        conn.commit()
+    
+    conn.close()
+    
+    response = RedirectResponse(url="/dashboard", status_code=303)
+    response.set_cookie(key="user_key", value=code)
+    return response
+
+@app.get("/dashboard", response_class=HTMLResponse)
+def user_dashboard(request: Request):
+    user_key = request.cookies.get("user_key")
+    if not user_key:
+        return RedirectResponse(url="/", status_code=303)
+    
+    return f"""
+    <!DOCTYPE html>
+    <html lang="ru">
+    <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>CRM Dashboard</title>{BASE_STYLE}</head>
+    <body>
+        <div class="container">
+            <h2>🚀 Рабочий кабинет CRM</h2>
+            <p style="color: var(--text-muted);">Авторизованный ключ: <strong>{user_key}</strong></p>
+            <hr style="border: 0; border-top: 1px solid var(--border); margin: 20px 0;">
+            <p>Здесь находится твой функционал управления аккаунтами, задачами и рассылками.</p>
+            <a href="/logout"><button class="btn-danger">Выйти из системы</button></a>
+        </div>
+    </body>
+    </html>
+    """
+
+@app.get("/logout")
+def logout():
+    response = RedirectResponse(url="/", status_code=303)
+    response.delete_cookie("user_key")
+    response.delete_cookie("admin_session")
+    return response
+
+
+# --- 2. АДМИН-ПАНЕЛЬ ( /admin ) ---
+@app.get("/admin/login", response_class=HTMLResponse)
+def admin_login_page(error: str = None):
+    err_html = f'<div class="error">{error}</div>' if error else ''
+    return f"""
+    <!DOCTYPE html>
+    <html lang="ru">
+    <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Админ-панель - Вход</title>{BASE_STYLE}</head>
+    <body>
+        <div class="container">
+            <h2>🔐 Панель Администратора</h2>
+            {err_html}
+            <form action="/admin/auth" method="POST">
+                <input type="password" name="password" placeholder="Пароль администратора" required>
+                <button type="submit">Войти в админку</button>
+            </form>
+            <a href="/" class="back-link">← Вернуться на главную</a>
+        </div>
+    </body>
+    </html>
+    """
+
+@app.post("/admin/auth")
+def admin_auth(password: str = Form(...)):
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute("SELECT value FROM admin_config WHERE key='admin_pass'")
+    row = cursor.fetchone()
+    conn.close()
+    
+    if row and row["value"] == password:
+        response = RedirectResponse(url="/admin", status_code=303)
+        response.set_cookie(key="admin_session", value="authenticated", httponly=True)
+        return response
+    
+    return RedirectResponse(url="/admin/login?error=Неверный пароль администратора", status_code=303)
+
+@app.get("/admin", response_class=HTMLResponse)
+def admin_panel(request: Request):
+    if request.cookies.get("admin_session") != "authenticated":
+        return RedirectResponse(url="/admin/login", status_code=303)
+        
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM access_keys ORDER BY id DESC")
+    keys = cursor.fetchall()
+    conn.close()
+    
+    rows_html = ""
+    for k in keys:
+        status_class = "tag-free" if k["status"] == "free" else "tag-active"
+        status_text = "Свободен" if k["status"] == "free" else "Активирован"
+        rows_html += f"""
+        <tr>
+            <td><code>{k["key_code"]}</code></td>
+            <td><span class="{status_class}">{status_text}</span></td>
+            <td>
+                <form action="/admin/keys/delete" method="POST" style="margin:0;">
+                    <input type="hidden" name="key_id" value="{k["id"]}">
+                    <button type="submit" style="padding:4px 8px; font-size:12px; margin:0;" class="btn-danger">Удалить</button>
+                </form>
+            </td>
+        </tr>
+        """
+        
+    return f"""
+    <!DOCTYPE html>
+    <html lang="ru">
+    <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Управление ключами CRM</title>{BASE_STYLE}</head>
+    <body>
+        <div class="container" style="max-width: 600px;">
+            <h2>🛠 Управление ключами доступа</h2>
+            <form action="/admin/keys/generate" method="POST">
+                <button type="submit">➕ Сгенерировать пачку (20 новых ключей)</button>
+            </form>
+            <hr style="border: 0; border-top: 1px solid var(--border); margin: 20px 0;">
+            <h3>Список всех ключей в системе</h3>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Ключ доступа</th>
+                        <th>Статус</th>
+                        <th>Действие</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {rows_html if rows_html else '<tr><td colspan="3" style="text-align:center; color:var(--text-muted);">Ключей пока нет. Нажми кнопку выше.</td></tr>'}
+                </tbody>
+            </table>
+            <div style="margin-top: 25px; display: flex; justify-content: space-between; align-items: center;">
+                <a href="/" class="back-link">🚪 На сайт</a>
+                <a href="/logout" style="color: var(--danger); text-decoration: none; font-size: 14px;">Выйти из админки</a>
+            </div>
+        </div>
+    </body>
+    </html>
+    """
+
+@app.post("/admin/keys/generate")
+def admin_generate(request: Request):
+    if request.cookies.get("admin_session") != "authenticated":
+        return RedirectResponse(url="/admin/login", status_code=303)
+    generate_keys_batch(20)
+    return RedirectResponse(url="/admin", status_code=303)
+
+@app.post("/admin/keys/delete")
+def admin_delete_key(request: Request, key_id: int = Form(...)):
+    if request.cookies.get("admin_session") != "authenticated":
+        return RedirectResponse(url="/admin/login", status_code=303)
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM access_keys WHERE id = ?", (key_id,))
+    conn.commit()
+    conn.close()
+    return RedirectResponse(url="/admin", status_code=303)
