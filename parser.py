@@ -1,18 +1,19 @@
 import asyncio
 from typing import List
 from telethon import TelegramClient
-from telethon.errors import FloodWaitError, ChatAdminRequiredError
+from telethon.errors import FloodWaitError
 
 async def run_parser(
     clients: List[TelegramClient],
     targets: List[str], # База чатов для парсинга
-    parser_mode: str = "active" # "all" (все участники) или "active" (те, кто писал в чат)
+    parser_mode: str = "active", # "all" (все участники) или "active" (те, кто писал в чат)
+    limit: int = 500 # Динамическая глубина сообщений или лимит участников, заданная пользователем
 ):
     """
-    Боевой модуль парсера GHOSTCORE:
-    - Режим "all": собирает всех доступных участников открытого чата.
-    - Режим "active": собирает только тех, кто реально писал сообщения в чате.
-    - Корректно обрабатывает скрытые списки участников и ошибки доступа.
+    Полный боевой модуль парсера GHOSTCORE:
+    - Режим "all": собирает участников открытого чата до указанного лимита.
+    - Режим "active": сканирует заданное количество сообщений (limit) и собирает авторов, которые реально писали в чат.
+    - Корректно обрабатывает скрытые списки участников.
     """
     results = {
         "success": 0,
@@ -36,11 +37,10 @@ async def run_parser(
         try:
             entity = await client.get_entity(target_clean)
             
-            # ВАРИАНТ А: Сбор только тех, кто писал в чат (активные по сообщениям)
+            # ВАРИАНТ А: Сбор активных по сообщениям (с учетом выбранной пользователем глубины limit)
             if parser_mode == "active":
                 msg_count = 0
-                # Проходим по недавним сообщениям в чате, чтобы вытащить авторов
-                async for message in client.iter_messages(entity, limit=500):
+                async for message in client.iter_messages(entity, limit=limit):
                     if message.sender and not message.sender.bot and not message.sender.deleted:
                         sender = message.sender
                         identifier = f"@{sender.username}" if sender.username else str(sender.id)
@@ -51,34 +51,34 @@ async def run_parser(
                     results["details"].append({"chat": target_clean, "warning": "В чате нет доступных сообщений для сбора активных"})
                 else:
                     results["success"] += 1
-                    results["details"].append({"chat": target_clean, "status": "active_parsed", "count": msg_count})
+                    results["details"].append({"chat": target_clean, "status": "active_parsed", "messages_checked": msg_count})
 
-            # ВАРИАНТ Б: Сбор всех участников (если список открыт)
+            # ВАРИАНТ Б: Сбор всех участников (с лимитом на количество)
             else:
                 try:
+                    count = 0
                     async for user in client.iter_participants(entity):
                         if not user or user.bot or user.deleted:
                             continue
                         identifier = f"@{user.username}" if user.username else str(user.id)
                         collected_users.add(identifier)
+                        count += 1
                         
-                        if len(collected_users) >= 2000:
+                        if count >= limit:
                             break
                             
                     results["success"] += 1
-                    results["details"].append({"chat": target_clean, "status": "all_parsed"})
+                    results["details"].append({"chat": target_clean, "status": "all_parsed", "count": count})
                 
-                except Exception as participant_err:
-                    # Если список участников скрыт настройками чата
+                except Exception:
                     results["failed"] += 1
                     results["details"].append({
                         "chat": target_clean, 
-                        "error": "Список участников скрыт или недоступен. Попробуйте режим «Активные» (сбор по сообщениям)."
+                        "error": "Список участников скрыт. Переключитесь на режим «Активные (по смс)»."
                     })
 
         except FloodWaitError as e:
             results["details"].append({"chat": target_clean, "error": f"FloodWait {e.seconds}s"})
-            print(f"⚠️ Парсер поймал FloodWait на {e.seconds} сек.")
             await asyncio.sleep(e.seconds)
             break
 
