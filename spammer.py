@@ -1,22 +1,26 @@
 import asyncio
 import random
-from typing import List
+from typing import List, Dict, Optional
 from telethon import TelegramClient
 from telethon.errors import FloodWaitError, PeerFloodError, UserIsBlockedError
 
 async def run_spammer(
     clients: List[TelegramClient], 
-    targets: List, # Список чатов/пользователей для рассылки
-    message_text: str = None, 
-    forward_from_link: dict = None, # Если пересылаем готовый пост: {"chat": "...", "msg_id": 123}
-    limit_per_account: int = 10, 
-    delay_min: int = 15, 
-    delay_max: int = 30
+    targets: List[str], # Список целей (чаты, @username, номера или линки)
+    target_type: str = "chats", # "chats" или "people"
+    spam_mode: str = "text", # "text" или "forward"
+    spam_order: str = "sequential", # "sequential" (поочередно) или "rand" (вразнобой)
+    texts: List[str] = None, # Список текстов (из наших плюсиков)
+    forward_links: List[str] = None, # Список ссылок на посты ТГ для репоста
+    limit_per_account: int = 20, 
+    delay_sec: int = 5
 ):
     """
-    Модуль рассылки сообщений:
-    - Поддерживает собственный текст или пересылку готового поста по ссылке.
-    - Распределяет нагрузку по аккаунтам с лимитами и рандомными паузами.
+    Боевой модуль рассылки GHOSTCORE:
+    - Поддерживает мульти-посты и списки ссылок (с добавлением через плюсики).
+    - Учитывает порядок (поочередно / вразнобой).
+    - Различает рассылку по чатам и по людям (номера / юзернеймы).
+    - Защищен от флуд-контроля и банов.
     """
     results = {
         "success": 0,
@@ -24,6 +28,19 @@ async def run_spammer(
         "flood_wait": 0,
         "details": []
     }
+
+    if not clients or not targets:
+        return {"error": "Нет активных аккаунтов или пустая база целей!"}
+
+    # Подготавливаем контент для отправки
+    content_items = []
+    if spam_mode == "text" and texts:
+        content_items = [t.strip() for t in texts if t.strip()]
+    elif spam_mode == "forward" and forward_links:
+        content_items = [l.strip() for l in forward_links if l.strip()]
+
+    if not content_items:
+        return {"error": "Список постов или ссылок пуст!"}
 
     target_index = 0
     total_targets = len(targets)
@@ -36,38 +53,65 @@ async def run_spammer(
         
         try:
             me = await client.get_me()
-            phone = me.phone
+            phone = me.phone or str(me.id)
         except Exception:
             phone = "Unknown"
 
         while sent_by_this_account < limit_per_account and target_index < total_targets:
-            target = targets[target_index]
-            target_index += 1
+            # Выбор цели в зависимости от порядка отправки
+            if spam_order == "rand":
+                target = random.choice(targets)
+            else:
+                target = targets[target_index]
+                target_index += 1
+
+            # Выбор контента (текст или репост) по порядку или случайно
+            content = random.choice(content_items) if spam_order == "rand" else content_items[sent_by_this_account % len(content_items)]
 
             try:
-                # Вариант А: Пересылка готового поста по ссылке
-                if forward_from_link:
-                    source_chat = forward_from_link["chat"]
-                    msg_id = forward_from_link["msg_id"]
-                    await client.forward_messages(target, msg_id, source_chat)
-                
-                # Вариант Б: Отправка собственного текста
-                elif message_text:
-                    await client.send_message(target, message_text)
+                # Очищаем цель от лишних пробелов
+                target_clean = target.strip()
+
+                # Вариант А: Репост по ссылке на пост ТГ (формат: https://t.me/channel/123)
+                if spam_mode == "forward" and "t.me/" in content:
+                    parts = content.split("t.me/")[-1].split("/")
+                    if len(parts) >= 2:
+                        source_chat = parts[0]
+                        msg_id = int(parts[1])
+                        await client.forward_messages(target_clean, msg_id, source_chat)
+                    else:
+                        raise ValueError(f"Неверный формат ссылки на пост: {content}")
+
+                # Вариант Б: Отправка текста (работает и для чатов, и для людей/номеров)
+                elif spam_mode == "text":
+                    # Если это номер телефона в режиме людей, Telethon может импортировать контакт или отправить по номеру
+                    if target_type == "people" and target_clean.startswith("+"):
+                        try:
+                            from telethon.tl.types import InputPhoneContact
+                            contact = InputPhoneContact(client_id=0, phone=target_clean, first_name="User", last_name="")
+                            result = await client(functions.contacts.ImportContactsRequest(contacts=[contact]))
+                            if result.users:
+                                user_to_msg = result.users[0]
+                                await client.send_message(user_to_msg, content)
+                            else:
+                                await client.send_message(target_clean, content)
+                        except Exception:
+                            await client.send_message(target_clean, content)
+                    else:
+                        await client.send_message(target_clean, content)
 
                 results["success"] += 1
                 sent_by_this_account += 1
-                results["details"].append({"account": phone, "target": str(target), "status": "sent"})
+                results["details"].append({"account": phone, "target": target_clean, "status": "sent"})
 
-                # Рандомная задержка между отправками
-                sleep_time = random.randint(delay_min, delay_max)
-                await asyncio.sleep(sleep_time)
+                # Пауза между сообщениями
+                await asyncio.sleep(delay_sec)
 
             except FloodWaitError as e:
                 results["flood_wait"] += 1
                 results["details"].append({"account": phone, "error": f"FloodWait {e.seconds}s"})
                 print(f"⚠️ Аккаунт {phone} поймал Флуд-контроль на {e.seconds} сек.")
-                break # Тормозим этот аккаунт, переходим к следующему
+                break # Тормозим этот аккаунт, переключаемся на следующий
 
             except (PeerFloodError, UserIsBlockedError):
                 results["failed"] += 1
@@ -76,7 +120,7 @@ async def run_spammer(
 
             except Exception as e:
                 results["failed"] += 1
-                results["details"].append({"account": phone, "target": str(target), "error": str(e)})
-                await asyncio.sleep(5)
+                results["details"].append({"account": phone, "target": target, "error": str(e)})
+                await asyncio.sleep(3)
 
     return results
