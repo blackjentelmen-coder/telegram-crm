@@ -1,5 +1,8 @@
 import os
 import asyncio
+import qrcode
+import io
+import base64
 from fastapi import FastAPI, Form, Request, Response
 from fastapi.responses import HTMLResponse, RedirectResponse
 from database import init_db, get_db
@@ -15,6 +18,9 @@ app = FastAPI()
 
 init_db()
 app.include_router(admin.router)
+
+# Временное хранилище активных процессов QR-авторизации в памяти сервера
+qr_sessions = {}
 
 @app.get("/", response_class=HTMLResponse)
 def client_home(request: Request, error: str = None):
@@ -124,13 +130,12 @@ def client_cabinet(request: Request, message: str = None):
     for acc in my_accounts:
         status_color = "#4ade80" if acc["status"] == "Активен" else "#f87171"
         
-        # Если аккаунт ожидает код SMS, выводим форму для ввода кода
         if acc["status"] == "Ожидает код":
             action_form = f"""
-            <form action="/cabinet/verify-code" method="POST" style="display: flex; gap: 5px; margin-top: 5px;">
+            <form action="/cabinet/verify-code" method="POST" style="display: flex; gap: 5px; margin-top: 8px;">
                 <input type="hidden" name="acc_id" value="{acc["id"]}">
-                <input type="text" name="code" placeholder="Код из ТГ..." required style="padding: 5px; width: 100px; margin: 0; background: #0f172a; border: 1px solid #334155; color: white; border-radius: 4px; font-size: 12px;">
-                <button type="submit" style="padding: 5px 10px; font-size: 12px; background: #10b981;">Подтвердить</button>
+                <input type="text" name="code" placeholder="Код из ТГ..." required style="padding: 6px; width: 120px; margin: 0; background: #0f172a; border: 1px solid #334155; color: white; border-radius: 4px; font-size: 13px;">
+                <button type="submit" style="padding: 6px 12px; font-size: 12px; background: #10b981;">Подтвердить</button>
             </form>
             """
         else:
@@ -175,6 +180,8 @@ def client_cabinet(request: Request, message: str = None):
             button {{ padding: 10px 15px; background: #3b82f6; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; }}
             button:hover {{ background: #2563eb; }}
             .btn-exit {{ background: #ef4444; color: white; padding: 8px 12px; text-decoration: none; border-radius: 4px; display: inline-block; font-weight: bold; font-size: 13px; }}
+            .auth-box {{ display: flex; gap: 20px; margin-top: 15px; }}
+            .auth-option {{ flex: 1; background: #0f172a; padding: 15px; border-radius: 6px; border: 1px solid #334155; }}
         </style>
     </head>
     <body>
@@ -191,16 +198,28 @@ def client_cabinet(request: Request, message: str = None):
 
             <div class="card">
                 <h3 style="margin-top:0;">Мои Telegram-аккаунты</h3>
-                <p style="font-size: 13px; color: #94a3b8;">Добавьте номер телефона, чтобы запросить код авторизации от Telegram.</p>
-                
                 <div style="margin-bottom: 15px;">
                     {accounts_html if accounts_html else '<p style="color: #64748b; font-size: 13px;">У вас пока нет добавленных аккаунтов.</p>'}
                 </div>
 
-                <form action="/cabinet/add-account" method="POST" style="display: flex; gap: 10px;">
-                    <input type="text" name="phone" placeholder="Номер телефона (+380...)" required style="margin:0; flex-grow:1;">
-                    <button type="submit" style="background: #10b981;">Запросить код</button>
-                </form>
+                <div class="auth-box">
+                    <!-- Способ 1: По номеру -->
+                    <div class="auth-option">
+                        <h4 style="margin: 0 0 10px 0; color: #60a5fa; font-size: 14px;">Вход по номеру (SMS)</h4>
+                        <form action="/cabinet/add-account" method="POST">
+                            <input type="text" name="phone" placeholder="+380..." required style="margin: 0 0 10px 0;">
+                            <button type="submit" style="width: 100%; background: #10b981; font-size: 13px;">Запросить код</button>
+                        </form>
+                    </div>
+
+                    <!-- Способ 2: По QR-коду -->
+                    <div class="auth-option" style="text-align: center;">
+                        <h4 style="margin: 0 0 10px 0; color: #c084fc; font-size: 14px;">Вход по QR-коду</h4>
+                        <form action="/cabinet/start-qr" method="GET">
+                            <button type="submit" style="width: 100%; background: #9333ea; font-size: 13px;">Получить QR-код</button>
+                        </form>
+                    </div>
+                </div>
             </div>
 
             <div class="card">
@@ -229,6 +248,98 @@ def client_cabinet(request: Request, message: str = None):
     </html>
     """
 
+@app.get("/cabinet/start-qr", response_class=HTMLResponse)
+async def start_qr_auth(request: Request):
+    client_key = request.cookies.get("client_session")
+    if not client_key:
+        return RedirectResponse(url="/", status_code=303)
+        
+    client = TelegramClient(StringSession(), API_ID, API_HASH)
+    await client.connect()
+    
+    try:
+        qr = await client.qr_login()
+        # Сохраняем клиент во временный словарь для проверки сканирования
+        session_id = uuid.uuid4().hex
+        qr_sessions[session_id] = {"client": client, "qr": qr}
+        
+        # Генерируем картинку QR-кода в base64
+        img = qrcode.make(qr.url)
+        buffered = io.BytesIO()
+        img.save(buffered, format="PNG")
+        img_str = base64.b64encode(buffered.getvalue()).decode()
+        
+        return f"""
+        <!DOCTYPE html>
+        <html lang="ru">
+        <head>
+            <meta charset="UTF-8"><title>Авторизация по QR</title>
+            <meta http-equiv="refresh" content="5"> <!-- Автообновление страницы каждые 5 сек для проверки статуса -->
+            <style>
+                body {{ font-family: sans-serif; background: #0f172a; color: #f8fafc; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }}
+                .card {{ background: #1e293b; padding: 30px; border-radius: 8px; width: 320px; text-align: center; box-shadow: 0 4px 6px rgba(0,0,0,0.3); }}
+                img {{ background: white; padding: 10px; border-radius: 6px; margin: 15px 0; width: 200px; height: 200px; }}
+                .btn-back {{ display: inline-block; margin-top: 15px; color: #94a3b8; text-decoration: none; font-size: 14px; }}
+            </style>
+        </head>
+        <body>
+            <div class="card">
+                <h3 style="margin-top: 0;">Сканируйте QR-код</h3>
+                <p style="font-size: 13px; color: #94a3b8;">Откройте Telegram на телефоне: <b>Настройки → Устройства → Подключить устройство</b></p>
+                <img src="data:image/png;base64,{img_str}" alt="QR Code">
+                <p style="font-size: 12px; color: #facc15;">Ожидание сканирования...</p>
+                <a href="/cabinet/check-qr?sid={session_id}" style="display:inline-block; margin-top:10px; padding:8px 15px; background:#3b82f6; color:white; border-radius:4px; text-decoration:none; font-weight:bold; font-size:13px;">Проверить вход</a>
+                <br>
+                <a href="/cabinet" class="btn-back">← Назад в кабинет</a>
+            </div>
+        </body>
+        </html>
+        """
+    except Exception as e:
+        await client.disconnect()
+        return RedirectResponse(url=f"/cabinet?message=Ошибка запуска QR: {str(e)}", status_code=303)
+
+@app.get("/cabinet/check-qr", response_class=HTMLResponse)
+async def check_qr_auth(request: Request, sid: str):
+    client_key = request.cookies.get("client_session")
+    if not client_key or sid not in qr_sessions:
+        return RedirectResponse(url="/cabinet", status_code=303)
+        
+    data = qr_sessions[sid]
+    client = data["client"]
+    qr = data["qr"]
+    
+    try:
+        # Проверяем, отсканировал ли пользователь QR
+        await qr.wait(timeout=3)
+        
+        # Если успешно авторизовались:
+        phone = client.get_me().phone if hasattr(client, 'get_me') else "Аккаунт QR"
+        # Получаем номер или подставляем заглушку, если api не возвращает телефон сразу
+        me = await client.get_me()
+        phone_str = f"+{me.phone}" if me and me.phone else "QR-Аккаунт"
+        
+        final_session_str = client.session.save()
+        await client.disconnect()
+        del qr_sessions[sid]
+        
+        db = get_db()
+        cursor = db.cursor()
+        cursor.execute(
+            "INSERT INTO client_tg_accounts (client_key, phone, session_string, status) VALUES (?, ?, ?, 'Активен')",
+            (client_key, phone_str, final_session_str)
+        )
+        db.commit()
+        db.close()
+        
+        return RedirectResponse(url="/cabinet?message=QR-код успешно сканирован, аккаунт активирован!", status_code=303)
+    except asyncio.TimeoutError:
+        # Еще не отсканировал, перенаправляем обратно на экран QR
+        return RedirectResponse(url=f"/cabinet/start-qr", status_code=303)
+    except Exception as e:
+        del qr_sessions[sid]
+        return RedirectResponse(url=f"/cabinet?message=Ошибка QR: {str(e)}", status_code=303)
+
 @app.post("/cabinet/add-account")
 async def add_client_account(request: Request, phone: str = Form(...)):
     client_key = request.cookies.get("client_session")
@@ -236,15 +347,12 @@ async def add_client_account(request: Request, phone: str = Form(...)):
         return RedirectResponse(url="/", status_code=303)
         
     clean_phone = phone.strip()
-    
-    # Инициализируем клиент Telethon с пустой StringSession для запроса кода
     client = TelegramClient(StringSession(), API_ID, API_HASH)
     await client.connect()
     
     try:
         sent = await client.send_code_request(clean_phone)
         phone_code_hash = sent.phone_code_hash
-        # Получаем StringSession в разобранном виде для сохранения сеанса ожидания
         session_str = client.session.save()
         await client.disconnect()
         
@@ -281,10 +389,7 @@ async def verify_client_code(request: Request, acc_id: int = Form(...), code: st
     await client.connect()
     
     try:
-        # Пробуем авторизоваться по коду
         await client.sign_in(phone=acc["phone"], code=code.strip(), phone_code_hash=acc["phone_code_hash"])
-        
-        # Сохраняем готовую авторизованную строку сессии
         final_session_str = client.session.save()
         await client.disconnect()
         
@@ -297,7 +402,7 @@ async def verify_client_code(request: Request, acc_id: int = Form(...), code: st
         db.commit()
         db.close()
         
-        return RedirectResponse(url="/cabinet?message=Аккаунт успешно авторизован и готов к работе!", status_code=303)
+        return RedirectResponse(url="/cabinet?message=Аккаунт успешно авторизован!", status_code=303)
     except Exception as e:
         await client.disconnect()
         return RedirectResponse(url=f"/cabinet?message=Ошибка авторизации: {str(e)}", status_code=303)
