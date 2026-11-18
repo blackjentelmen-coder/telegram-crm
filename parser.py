@@ -1,58 +1,92 @@
-import re
-from typing import Dict, Any, Optional
+import asyncio
+from typing import List
+from telethon import TelegramClient
+from telethon.errors import FloodWaitError, ChatAdminRequiredError
 
-def parse_telegram_link(link: str) -> Optional[Dict[str, Any]]:
+async def run_parser(
+    clients: List[TelegramClient],
+    targets: List[str], # База чатов для парсинга
+    parser_mode: str = "active" # "all" (все участники) или "active" (те, кто писал в чат)
+):
     """
-    Распознает и разбирает все типы ссылок Telegram:
-    - Публичные каналы/чаты
-    - Приватные инвайт-ссылки (+hash или joinchat/hash)
-    - Ссылки на конкретные сообщения (в публичных и приватных чатах)
+    Боевой модуль парсера GHOSTCORE:
+    - Режим "all": собирает всех доступных участников открытого чата.
+    - Режим "active": собирает только тех, кто реально писал сообщения в чате.
+    - Корректно обрабатывает скрытые списки участников и ошибки доступа.
     """
-    link = link.strip()
-    
-    # 1. Обработка юзернейма в чистом виде (например, @durov)
-    if link.startswith('@'):
-        return {
-            "type": "public_chat",
-            "identifier": link[1:],
-            "message_id": None
-        }
+    results = {
+        "success": 0,
+        "failed": 0,
+        "total_parsed": 0,
+        "users": [],
+        "details": []
+    }
 
-    # 2. Шаблоны для ссылок t.me / telegram.me
-    # Приватная инвайт-ссылка со знаком плюс: t.me/+hash или t.me/joinchat/hash
-    private_invite_match = re.search(r'(?:t\.me|telegram\.me)/(?:\+|joinchat/)([a-zA-Z0-9_\-]+)', link)
-    if private_invite_match:
-        return {
-            "type": "private_invite",
-            "identifier": private_invite_match.group(1),
-            "message_id": None
-        }
+    if not clients or not targets:
+        return {"error": "Нет активных аккаунтов или не указаны чаты для парсинга!"}
 
-    # Ссылка на конкретное сообщение в супергруппе/канале с ID: t.me/c/1234567890/555
-    msg_c_match = re.search(r'(?:t\.me|telegram\.me)/c/(\d+)/(\d+)', link)
-    if msg_c_match:
-        return {
-            "type": "message_c",
-            "chat_id": int("-100" + msg_c_match.group(1)), # Телеграм требует -100 для супергрупп
-            "message_id": int(msg_c_match.group(2))
-        }
+    client = clients[0]
+    collected_users = set()
 
-    # Ссылка на сообщение в публичном чате: t.me/username/555
-    msg_public_match = re.search(r'(?:t\.me|telegram\.me)/([a-zA-Z0-9_]+)/(\d+)', link)
-    if msg_public_match:
-        return {
-            "type": "message_public",
-            "identifier": msg_public_match.group(1),
-            "message_id": int(msg_public_match.group(2))
-        }
+    for target in targets:
+        target_clean = target.strip()
+        if not target_clean:
+            continue
 
-    # Обычная ссылка на публичный чат/канал: t.me/username
-    public_match = re.search(r'(?:t\.me|telegram\.me)/([a-zA-Z0-9_]+)', link)
-    if public_match:
-        return {
-            "type": "public_chat",
-            "identifier": public_match.group(1),
-            "message_id": None
-        }
+        try:
+            entity = await client.get_entity(target_clean)
+            
+            # ВАРИАНТ А: Сбор только тех, кто писал в чат (активные по сообщениям)
+            if parser_mode == "active":
+                msg_count = 0
+                # Проходим по недавним сообщениям в чате, чтобы вытащить авторов
+                async for message in client.iter_messages(entity, limit=500):
+                    if message.sender and not message.sender.bot and not message.sender.deleted:
+                        sender = message.sender
+                        identifier = f"@{sender.username}" if sender.username else str(sender.id)
+                        collected_users.add(identifier)
+                        msg_count += 1
+                
+                if msg_count == 0:
+                    results["details"].append({"chat": target_clean, "warning": "В чате нет доступных сообщений для сбора активных"})
+                else:
+                    results["success"] += 1
+                    results["details"].append({"chat": target_clean, "status": "active_parsed", "count": msg_count})
 
-    return None # Если формат не распознан
+            # ВАРИАНТ Б: Сбор всех участников (если список открыт)
+            else:
+                try:
+                    async for user in client.iter_participants(entity):
+                        if not user or user.bot or user.deleted:
+                            continue
+                        identifier = f"@{user.username}" if user.username else str(user.id)
+                        collected_users.add(identifier)
+                        
+                        if len(collected_users) >= 2000:
+                            break
+                            
+                    results["success"] += 1
+                    results["details"].append({"chat": target_clean, "status": "all_parsed"})
+                
+                except Exception as participant_err:
+                    # Если список участников скрыт настройками чата
+                    results["failed"] += 1
+                    results["details"].append({
+                        "chat": target_clean, 
+                        "error": "Список участников скрыт или недоступен. Попробуйте режим «Активные» (сбор по сообщениям)."
+                    })
+
+        except FloodWaitError as e:
+            results["details"].append({"chat": target_clean, "error": f"FloodWait {e.seconds}s"})
+            print(f"⚠️ Парсер поймал FloodWait на {e.seconds} сек.")
+            await asyncio.sleep(e.seconds)
+            break
+
+        except Exception as e:
+            results["failed"] += 1
+            results["details"].append({"chat": target_clean, "error": str(e)})
+
+    results["users"] = list(collected_users)
+    results["total_parsed"] = len(results["users"])
+
+    return results
