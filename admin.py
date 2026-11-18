@@ -6,7 +6,6 @@ from database import get_db
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
-# Задай здесь свой надежный логин и пароль для админки
 ADMIN_USER = "admin"
 ADMIN_PASS = "secret123"
 
@@ -22,8 +21,6 @@ def login_page():
             .login-box { background: #1e293b; padding: 30px; border-radius: 8px; width: 300px; box-shadow: 0 4px 6px rgba(0,0,0,0.3); }
             input { width: 100%; padding: 10px; margin: 10px 0; background: #0f172a; border: 1px solid #334155; color: white; border-radius: 4px; box-sizing: border-box; }
             button { width: 100%; padding: 10px; background: #3b82f6; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; }
-            button:hover { background: #2563eb; }
-            .error { color: #f87171; font-size: 14px; text-align: center; margin-bottom: 10px; }
         </style>
     </head>
     <body>
@@ -68,10 +65,13 @@ def admin_panel(request: Request):
     for k in keys:
         status_class = "tag-free" if k["status"] == "free" else "tag-active"
         status_text = "Свободен" if k["status"] == "free" else "Активирован"
+        client_display = k["client_name"] if k["client_name"] else "—"
+        
         rows_html += f"""
         <tr>
             <td><code>{k["key_code"]}</code></td>
             <td><span class="{status_class}">{status_text}</span></td>
+            <td>{client_display}</td>
             <td>
                 <form action="/admin/keys/delete" method="POST" style="margin:0;">
                     <input type="hidden" name="key_id" value="{k["id"]}">
@@ -88,7 +88,7 @@ def admin_panel(request: Request):
         <meta charset="UTF-8"><title>Админ-панель</title>
         <style>
             body {{ font-family: sans-serif; background: #0f172a; color: #f8fafc; padding: 20px; }}
-            .container {{ max-width: 800px; margin: 0 auto; background: #1e293b; padding: 20px; border-radius: 8px; }}
+            .container {{ max-width: 900px; margin: 0 auto; background: #1e293b; padding: 20px; border-radius: 8px; }}
             .header {{ display: flex; justify-content: space-between; align-items: center; }}
             table {{ width: 100%; border-collapse: collapse; margin-top: 15px; }}
             th, td {{ padding: 10px; border-bottom: 1px solid #334155; text-align: left; }}
@@ -107,7 +107,7 @@ def admin_panel(request: Request):
                 <button type="submit" style="padding: 10px 15px; background: #3b82f6; color: white; border:none; border-radius:4px; cursor:pointer; font-weight:bold;">Сгенерировать ключ</button>
             </form>
             <table>
-                <tr><th>Ключ</th><th>Статус</th><th>Действие</th></tr>
+                <tr><th>Ключ</th><th>Статус</th><th>Клиент</th><th>Действие</th></tr>
                 {rows_html}
             </table>
         </div>
@@ -123,7 +123,7 @@ def add_key(request: Request):
     db = get_db()
     cursor = db.cursor()
     new_key = str(uuid.uuid4())[:8].upper()
-    cursor.execute("INSERT INTO access_keys (key_code, status) VALUES (?, 'free')", (new_key,))
+    cursor.execute("INSERT INTO access_keys (key_code, status, client_name) VALUES (?, 'free', NULL)", (new_key,))
     db.commit()
     db.close()
     return RedirectResponse(url="/admin", status_code=303)
