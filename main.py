@@ -184,10 +184,8 @@ def admin_auth(password: str = Form(...)):
 def admin_panel(request: Request):
     if request.cookies.get("admin_session") != "authenticated":
         return RedirectResponse(url="/admin/login", status_code=303)
-        
-    conn = get_db()
-    cursor = conn.cursor()
-        db = get_db()
+    
+    db = get_db()
     cursor = db.cursor()
     cursor.execute("SELECT * FROM access_keys ORDER BY id DESC")
     keys = cursor.fetchall()
@@ -195,11 +193,9 @@ def admin_panel(request: Request):
     
     rows_html = ""
     for k in keys:
-        
         status_class = "tag-free" if k["status"] == "free" else "tag-active"
         status_text = "Свободен" if k["status"] == "free" else "Активирован"
-        rows_html += f"""
-        <tr>
+
             <td><code>{k["key_code"]}</code></td>
             <td><span class="{status_class}">{status_text}</span></td>
             <td>
