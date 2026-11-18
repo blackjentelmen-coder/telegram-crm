@@ -3,27 +3,212 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Telegram CRM Комбайн</title>
+    <title>Telegram CRM | Neon Cyber</title>
     <style>
-        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #0f172a; color: #f8fafc; margin: 0; padding: 15px; }
-        .container { max-width: 480px; margin: 0 auto; }
-        .card { background: #1e293b; padding: 20px; border-radius: 12px; margin-bottom: 15px; box-shadow: 0 4px 6px rgba(0,0,0,0.3); }
-        .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; }
-        .btn-danger { background: #ef4444; color: white; border: none; padding: 6px 12px; border-radius: 6px; cursor: pointer; font-weight: bold; font-size: 13px; }
-        .btn-primary { background: #3b82f6; color: white; border: none; padding: 10px; width: 100%; border-radius: 6px; cursor: pointer; font-weight: bold; margin-top: 10px; }
-        .btn-success { background: #10b981; color: white; border: none; padding: 10px; width: 100%; border-radius: 6px; cursor: pointer; font-weight: bold; margin-top: 10px; }
-        input, select, textarea { width: 100%; padding: 10px; margin: 8px 0; background: #0f172a; border: 1px solid #334155; color: white; border-radius: 6px; box-sizing: border-box; font-size: 14px; }
-        h3 { margin-top: 0; font-size: 16px; color: #38bdf8; }
-        .tool-settings { display: none; margin-top: 10px; border-top: 1px solid #334155; padding-top: 10px; }
-        .active-tool { display: block; }
-        label { font-size: 12px; color: #94a3b8; display: block; margin-top: 5px; }
+        :root {
+            --bg-color: #050507;
+            --card-bg: #0f0f13;
+            --neon-red: #ff1e42;
+            --neon-red-glow: rgba(255, 30, 66, 0.4);
+            --border-color: #261118;
+            --text-main: #f3f4f6;
+            --text-muted: #9ca3af;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background: var(--bg-color);
+            color: var(--text-main);
+            margin: 0;
+            padding: 15px;
+        }
+
+        .container {
+            max-width: 480px;
+            margin: 0 auto;
+        }
+
+        .card {
+            background: var(--card-bg);
+            border: 1px solid var(--border-color);
+            padding: 20px;
+            border-radius: 14px;
+            margin-bottom: 15px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.7);
+        }
+
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .btn-danger {
+            background: transparent;
+            color: var(--neon-red);
+            border: 1px solid var(--neon-red);
+            padding: 6px 14px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: bold;
+            font-size: 13px;
+            box-shadow: 0 0 10px var(--neon-red-glow);
+            transition: 0.2s;
+        }
+        .btn-danger:active {
+            background: var(--neon-red);
+            color: white;
+        }
+
+        h3 {
+            margin-top: 0;
+            font-size: 15px;
+            color: var(--text-main);
+            letter-spacing: 0.5px;
+            text-transform: uppercase;
+        }
+
+        /* Неоновые табы-кнопки выбора инструмента вместо системного селекта */
+        .tool-tabs {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 8px;
+            margin-bottom: 15px;
+        }
+
+        .tool-tab {
+            background: #141419;
+            border: 1px solid #2a1b20;
+            color: var(--text-muted);
+            padding: 10px 5px;
+            text-align: center;
+            border-radius: 8px;
+            font-size: 12px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .tool-tab.active {
+            background: rgba(255, 30, 66, 0.15);
+            border-color: var(--neon-red);
+            color: #fff;
+            box-shadow: 0 0 12px var(--neon-red-glow);
+        }
+
+        /* Всплывающие/переключаемые блоки настроек */
+        .tool-panel {
+            display: none;
+            background: #09090c;
+            border: 1px solid #1f1116;
+            padding: 15px;
+            border-radius: 10px;
+            margin-bottom: 15px;
+            animation: fadeIn 0.3s ease;
+        }
+
+        .tool-panel.active {
+            display: block;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(-4px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        label {
+            font-size: 11px;
+            color: var(--text-muted);
+            display: block;
+            margin-top: 8px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        input, textarea {
+            width: 100%;
+            padding: 10px;
+            margin: 6px 0;
+            background: #050507;
+            border: 1px solid #261118;
+            color: white;
+            border-radius: 8px;
+            box-sizing: border-box;
+            font-size: 14px;
+            outline: none;
+            transition: border-color 0.2s, box-shadow 0.2s;
+        }
+
+        input:focus, textarea:focus {
+            border-color: var(--neon-red);
+            box-shadow: 0 0 8px var(--neon-red-glow);
+        }
+
+        .btn-action {
+            background: linear-gradient(135deg, #cc1433, #ff1e42);
+            color: white;
+            border: none;
+            padding: 12px;
+            width: 100%;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: bold;
+            font-size: 14px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            box-shadow: 0 0 15px var(--neon-red-glow);
+            transition: 0.2s;
+            margin-top: 5px;
+        }
+        .btn-action:active {
+            transform: scale(0.98);
+        }
+
+        .btn-success {
+            background: #111b15;
+            color: #10b981;
+            border: 1px solid #064e3b;
+            padding: 10px;
+            width: 100%;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: bold;
+            margin-top: 8px;
+            transition: 0.2s;
+        }
+        .btn-success:active {
+            background: #064e3b;
+            color: white;
+        }
+        
+        .history-box {
+            color: #6b7280;
+            font-size: 12px;
+            text-align: center;
+            padding: 10px 0;
+        }
     </style>
     <script>
-        function switchTool() {
-            var selected = document.getElementById("task_type").value;
-            document.getElementById("settings-spammer").style.display = (selected === "spammer") ? "block" : "none";
-            document.getElementById("settings-inviter").style.display = (selected === "inviter") ? "block" : "none";
-            document.getElementById("settings-parser").style.display = (selected === "parser") ? "block" : "none";
+        function selectTool(toolName) {
+            // Убираем активный класс у всех кнопок-табов
+            document.querySelectorAll('.tool-tab').forEach(tab => tab.classList.remove('active'));
+            // Скрываем все панели настроек
+            document.querySelectorAll('.tool-panel').forEach(panel => panel.classList.remove('active'));
+
+            // Включаем нужную кнопку и показываем соответствующее всплывающее окно-панель
+            if (toolName === 'spammer') {
+                document.getElementById('tab-spammer').classList.add('active');
+                document.getElementById('panel-spammer').classList.add('active');
+                document.getElementById('current_task_input').value = 'spammer';
+            } else if (toolName === 'inviter') {
+                document.getElementById('tab-inviter').classList.add('active');
+                document.getElementById('panel-inviter').classList.add('active');
+                document.getElementById('current_task_input').value = 'inviter';
+            } else if (toolName === 'parser') {
+                document.getElementById('tab-parser').classList.add('active');
+                document.getElementById('panel-parser').classList.add('active');
+                document.getElementById('current_task_input').value = 'parser';
+            }
         }
     </script>
 </head>
@@ -32,75 +217,82 @@
         <!-- Шапка -->
         <div class="card header">
             <div>
-                <div style="font-size: 13px; color: #94a3b8;">Клиент</div>
-                <div style="font-weight: bold; font-size: 16px;">Панель управления</div>
+                <div style="font-size: 11px; color: var(--text-muted); text-transform: uppercase;">Система</div>
+                <div style="font-weight: bold; font-size: 15px; color: var(--neon-red);">KRYPTON COMBO</div>
             </div>
-            <a href="/logout-client" style="text-decoration: none;"><button class="btn-danger">Выйти</button></a>
+            <a href="/logout-client" style="text-decoration: none;"><button class="btn-danger">ВЫЙТИ</button></a>
         </div>
 
-        <!-- Аккаунты -->
+        <!-- Управление аккаунтами -->
         <div class="card">
             <h3>Telegram Аккаунты</h3>
             <form action="/cabinet/add-account" method="POST">
                 <input type="text" name="phone" placeholder="+380..." required>
-                <button type="submit" class="btn-success">Запросить код (SMS)</button>
+                <button type="submit" class="btn-success">ЗАПРОСИТЬ SMS КОД</button>
             </form>
-            <div style="text-align: center; margin: 10px 0; color: #64748b; font-size: 13px;">или</div>
-            <a href="/cabinet/start-qr"><button class="btn-primary" style="background: #8b5cf6; margin-top:0;">Вход по QR-коду</button></a>
+            <div style="text-align: center; margin: 8px 0; color: #4b5563; font-size: 11px;">ИЛИ АВТОРИЗАЦИЯ</div>
+            <a href="/cabinet/start-qr"><button class="btn-success" style="border-color: #581c87; color: #a855f7; margin-top:0;">ВХОД ПО QR-КОДУ</button></a>
         </div>
 
-        <!-- Панель задач с переключением настроек -->
+        <!-- Панель задач с кастомными неоновыми вкладками -->
         <div class="card">
-            <h3>Запуск задач</h3>
+            <h3>Панель инструментов</h3>
+            
             <form action="/cabinet/run-task" method="POST">
-                <label>Выберите инструмент:</label>
-                <select name="task_type" id="task_type" onchange="switchTool()">
-                    <option value="spammer">🚀 Спамер / Рассылка</option>
-                    <option value="inviter">👥 Инвайтер (добавление)</option>
-                    <option value="parser">🔍 Парсер (сбор базы)</option>
-                </select>
+                <!-- Скрытое поле, куда запишется выбранный инструмент -->
+                <input type="hidden" name="task_type" id="current_task_input" value="spammer">
 
-                <!-- Настройки для Спамера -->
-                <div id="settings-spammer" class="tool-settings active-tool">
-                    <label>Текст сообщения:</label>
-                    <textarea name="spam_text" rows="3" placeholder="Введите текст для рассылки..."></textarea>
-                    <label>Задержка между сообщениями (сек):</label>
+                <!-- Кнопки выбора (вместо системного выпадающего списка) -->
+                <div class="tool-tabs">
+                    <div id="tab-spammer" class="tool-tab active" onclick="selectTool('spammer')">🚀 Спамер</div>
+                    <div id="tab-inviter" class="tool-tab" onclick="selectTool('inviter')">👥 Инвайтер</div>
+                    <div id="tab-parser" class="tool-tab" onclick="selectTool('parser')">🔍 Парсер</div>
+                </div>
+
+                <!-- Всплывающий блок настроек: Спамер -->
+                <div id="panel-spammer" class="tool-panel active">
+                    <label>Текст рассылки:</label>
+                    <textarea name="spam_text" rows="3" placeholder="Введите текст сообщения..."></textarea>
+                    
+                    <label>Задержка (сек):</label>
                     <input type="number" name="spam_delay" value="5" min="1">
-                    <label>Лимит сообщений с одного акка:</label>
+                    
+                    <label>Лимит на аккаунт:</label>
                     <input type="number" name="spam_limit" value="20" min="1">
                 </div>
 
-                <!-- Настройки для Инвайтера -->
-                <div id="settings-inviter" class="tool-settings" style="display:none;">
-                    <label>Ссылка на чат-донор (откуда брать людей):</label>
+                <!-- Всплывающий блок настроек: Инвайтер -->
+                <div id="panel-inviter" class="tool-panel">
+                    <label>Чат-донор (откуда брать):</label>
                     <input type="text" name="inviter_source" placeholder="https://t.me/donor_chat">
-                    <label>Ссылка на ваш целевой чат:</label>
-                    <input type="text" name="inviter_target" placeholder="https://t.me/your_chat">
-                    <label>Количество инвайтов за раз:</label>
+                    
+                    <label>Целевой чат (куда инваитить):</label>
+                    <input type="text" name="inviter_target" placeholder="https://t.me/my_chat">
+                    
+                    <label>Количество за раз:</label>
                     <input type="number" name="inviter_limit" value="10" min="1">
+                    
                     <label>Задержка (сек):</label>
                     <input type="number" name="inviter_delay" value="10" min="1">
                 </div>
 
-                <!-- Настройки для Парсера -->
-                <div id="settings-parser" class="tool-settings" style="display:none;">
+                <!-- Всплывающий блок настроек: Парсер -->
+                <div id="panel-parser" class="tool-panel">
                     <label>Ссылка на чат для парсинга:</label>
                     <input type="text" name="parser_target" placeholder="https://t.me/target_chat">
+                    
                     <label>Что собирать:</label>
-                    <select name="parser_mode">
-                        <option value="members">Участников чата</option>
-                        <option value="messages">Сообщения / активных юзеров</option>
-                    </select>
+                    <input type="text" name="parser_mode" value="Участники (активные)" readonly style="color: var(--text-muted);">
                 </div>
 
-                <button type="submit" class="btn-primary">Запустить задачу в работу</button>
+                <button type="submit" class="btn-action">ЗАПУСТИТЬ В РАБОТУ</button>
             </form>
         </div>
 
         <!-- История -->
         <div class="card">
             <h3>История задач</h3>
-            <p style="color: #64748b; font-size: 13px; margin: 0;">Здесь будут отображаться статусы выполнения.</p>
+            <div class="history-box">Ожидание запусков...</div>
         </div>
     </div>
 </body>
