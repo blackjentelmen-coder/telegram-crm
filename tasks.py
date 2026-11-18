@@ -1,48 +1,58 @@
 import asyncio
-import logging
-from datetime import datetime
+from telethon import TelegramClient
+from telethon.errors import ChatAdminRequiredError, UserPrivacyRestrictedError
 
-# Настройка простого логирования для отслеживания фоновых задач
-logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+async def analyze_chat_messages(
+    client: TelegramClient, 
+    chat_identifier: str, 
+    limit: int = 5000, 
+    target_user_id: int = None
+):
+    """
+    Анализирует чат:
+    - Если задан target_user_id, собирает сообщения конкретного человека.
+    - Если target_user_id нет, сканирует последние `limit` сообщений (до 5000) 
+      и собирает статистику/авторов, обходя ограничения скрытых участников.
+    """
+    try:
+        chat = await client.get_entity(chat_identifier)
+    except Exception as e:
+        return {"error": f"Не удалось найти чат: {e}"}
 
-class BackgroundTaskManager:
-    def __init__(self):
-        # Словарь для отслеживания активных фоновых задач (например, рассылок)
-        self.active_tasks = {}
+    results = []
+    users_found = set()
 
-    async def simulate_heavy_telegram_task(self, task_id: int, account_phone: str, action_type: str):
-        """
-        Имитация тяжелой асинхронной задачи (рассылка, парсинг),
-        которая не блокирует основной потоковый сервер FastAPI.
-        """
-        logging.info(f"Задача #{task_id} [{action_type}] для аккаунта {account_phone} запущена.")
-        
-        try:
-            # Имитируем сетевые задержки или запросы к Telegram API
-            for i in range(3):
-                await asyncio.sleep(2)
-                logging.info(f"Задача #{task_id} ({account_phone}): выполнение шаг {i+1}/3...")
+    # Сценарий А: Сбор по конкретному выбранному пользователю
+    if target_user_id:
+        async for message in client.iter_messages(chat, from_user=target_user_id, limit=limit):
+            if message.text:
+                results.append({
+                    "message_id": message.id,
+                    "date": str(message.date),
+                    "text": message.text
+                })
+        return {"mode": "single_user", "user_id": target_user_id, "messages": results}
+
+    # Сценарий Б: Анализ последних N сообщений (например, 5000) с автоопределением участников
+    try:
+        async for message in client.iter_messages(chat, limit=limit):
+            if message.sender_id:
+                users_found.add(message.sender_id)
             
-            logging.info(f"Задача #{task_id} [{action_type}] для аккаунта {account_phone} успешно завершена.")
-            return {"task_id": task_id, "status": "completed", "timestamp": str(datetime.now())}
-        
-        except asyncio.CancelledError:
-            logging.warning(f"Задача #{task_id} для аккаунта {account_phone} была отменена.")
-            raise
-        except Exception as e:
-            logging.error(f"Ошибка в задаче #{task_id}: {str(e)}")
-            return {"task_id": task_id, "status": "failed", "error": str(e)}
+            # Сохраняем базовую инфо о сообщениях для анализа
+            if message.text:
+                results.append({
+                    "message_id": message.id,
+                    "sender_id": message.sender_id,
+                    "date": str(message.date),
+                    "text": message.text
+                })
+    except Exception as e:
+        return {"error": f"Ошибка при чтении сообщений: {e}"}
 
-    def run_task_in_background(self, task_id: int, account_phone: str, action_type: str):
-        """
-        Метод для запуска задачи в фоновом режиме через asyncio.create_task
-        """
-        loop = asyncio.get_event_loop()
-        task = loop.create_task(
-            self.simulate_heavy_telegram_task(task_id, account_phone, action_type)
-        )
-        self.active_tasks[task_id] = task
-        return task_id
-
-# Глобальный менеджер задач
-task_manager = BackgroundTaskManager()
+    return {
+        "mode": "mass_analysis",
+        "scanned_messages": len(results),
+        "unique_active_senders": len(users_found),
+        "messages": results[:100]  глейм/вырезка для превью, остальное в базу
+    }
