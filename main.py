@@ -4,7 +4,7 @@ from datetime import datetime
 from fastapi import FastAPI, Form, Request, Response
 from fastapi.responses import HTMLResponse, RedirectResponse
 
-app = FastAPI(title="Telegram CRM", version="2.2")
+app = FastAPI(title="Telegram CRM", version="2.3")
 
 DB_FILE = "crm.db"
 
@@ -140,11 +140,11 @@ BASE_STYLE = """
 </style>
 """
 
-# --- 1. АДМИН-ПАНЕЛЬ (ВЫШЕ ВСЕГО) ---
+# --- 1. АДМИН-ПАНЕЛЬ ---
 @app.get("/admin/login", response_class=HTMLResponse)
 def admin_login_page(error: str = None):
     err_html = f'<div class="error">{error}</div>' if error else ''
-    return f"""
+    content = f"""
     <!DOCTYPE html>
     <html lang="ru">
     <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Админ-панель - Вход</title>{BASE_STYLE}</head>
@@ -163,6 +163,7 @@ def admin_login_page(error: str = None):
     </body>
     </html>
     """
+    return HTMLResponse(content=content, headers={"Cache-Control": "no-store, no-cache, must-revalidate"})
 
 @app.post("/admin/auth")
 def admin_auth(password: str = Form(...)):
@@ -207,13 +208,13 @@ def admin_panel(request: Request):
         </tr>
         """
         
-    return f"""
+    content = f"""
     <!DOCTYPE html>
     <html lang="ru">
     <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Управление ключами CRM</title>{BASE_STYLE}</head>
     <body>
         <div class="container" style="max-width: 600px;">
-            <h2>🛠 Управление ключами доступа</h2>
+            <h2>🛠 Управление ключами [v2.3]</h2>
             <form action="/admin/keys/generate" method="POST">
                 <button type="submit">➕ Сгенерировать пачку (20 ключей)</button>
             </form>
@@ -241,6 +242,7 @@ def admin_panel(request: Request):
     </body>
     </html>
     """
+    return HTMLResponse(content=content, headers={"Cache-Control": "no-store, no-cache, must-revalidate"})
 
 @app.post("/admin/keys/generate")
 def admin_generate(request: Request):
@@ -261,18 +263,18 @@ def admin_delete_key(request: Request, key_id: int = Form(...)):
     return RedirectResponse(url="/admin", status_code=303)
 
 
-# --- 2. КЛИЕНТСКИЙ ВХОД И ОБЩИЕ МАРШРУТЫ ---
+# --- 2. КЛИЕНТСКИЙ ВХОД ---
 @app.get("/", response_class=HTMLResponse)
 def user_login_page(error: str = None):
     err_html = f'<div class="error">{error}</div>' if error else ''
-    return f"""
+    content = f"""
     <!DOCTYPE html>
     <html lang="ru">
     <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Telegram CRM - Вход</title>{BASE_STYLE}</head>
     <body>
         <div class="container">
-            <h2>Telegram CRM</h2>
-            <p style="color: var(--text-muted);">Введите ваш персональный ключ доступа для входа.</p>
+            <h2>Telegram CRM [v2.3]</h2>
+            <p style="color: var(--text-muted);">Введите ваш персональный ключ доступа.</p>
             {err_html}
             <form action="/auth" method="POST">
                 <input type="text" name="key_code" placeholder="CRM-XXXX-XXXX-XXXX" required autocomplete="off">
@@ -285,6 +287,7 @@ def user_login_page(error: str = None):
     </body>
     </html>
     """
+    return HTMLResponse(content=content, headers={"Cache-Control": "no-store, no-cache, must-revalidate"})
 
 @app.post("/auth")
 def user_authenticate(key_code: str = Form(...)):
@@ -318,7 +321,7 @@ def user_dashboard(request: Request):
     if not user_key:
         return RedirectResponse(url="/", status_code=303)
     
-    return f"""
+    content = f"""
     <!DOCTYPE html>
     <html lang="ru">
     <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>CRM Dashboard</title>{BASE_STYLE}</head>
@@ -333,6 +336,7 @@ def user_dashboard(request: Request):
     </body>
     </html>
     """
+    return HTMLResponse(content=content, headers={"Cache-Control": "no-store, no-cache, must-revalidate"})
 
 @app.get("/logout")
 def logout():
