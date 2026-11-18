@@ -27,25 +27,37 @@ def client_home(request: Request, error: str = None):
     if request.cookies.get("client_session"):
         return RedirectResponse(url="/cabinet", status_code=303)
         
-    err_html = f'<div style="color: #f87171; margin-bottom: 15px; text-align: center;">{error}</div>' if error else ""
+    err_html = f'<div style="color: #ff1e42; margin-bottom: 15px; text-align: center; font-size: 13px;">{error}</div>' if error else ""
     
     return f"""
     <!DOCTYPE html>
     <html lang="ru">
     <head>
-        <meta charset="UTF-8"><title>Вход в систему</title>
+        <meta charset="UTF-8"><title>GHOSTCORE | Вход</title>
         <style>
-            body {{ font-family: sans-serif; background: #0f172a; color: #f8fafc; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }}
-            .card {{ background: #1e293b; padding: 30px; border-radius: 8px; width: 360px; box-shadow: 0 4px 6px rgba(0,0,0,0.3); }}
-            input {{ width: 100%; padding: 10px; margin: 10px 0; background: #0f172a; border: 1px solid #334155; color: white; border-radius: 4px; box-sizing: border-box; }}
-            button {{ width: 100%; padding: 12px; background: #3b82f6; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; margin-top: 5px; }}
-            button:hover {{ background: #2563eb; }}
-            .divider {{ text-align: center; margin: 20px 0; color: #64748b; font-size: 14px; }}
+            :root {{
+                --bg-color: #050507;
+                --card-bg: #0f0f13;
+                --neon-red: #ff1e42;
+                --neon-red-glow: rgba(255, 30, 66, 0.4);
+                --border-color: #261118;
+                --text-main: #f3f4f6;
+                --text-muted: #9ca3af;
+            }}
+            body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: var(--bg-color); color: var(--text-main); display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }}
+            .card {{ background: var(--card-bg); border: 1px solid var(--border-color); padding: 30px; border-radius: 14px; width: 340px; box-shadow: 0 4px 20px rgba(0, 0, 0, 0.7); box-sizing: border-box; }}
+            h2 {{ text-align: center; margin-top: 0; font-size: 16px; text-transform: uppercase; letter-spacing: 1px; color: var(--neon-red); }}
+            input {{ width: 100%; padding: 12px; margin: 8px 0; background: #050507; border: 1px solid var(--border-color); color: white; border-radius: 8px; box-sizing: border-box; outline: none; font-size: 14px; }}
+            input:focus {{ border-color: var(--neon-red); box-shadow: 0 0 8px var(--neon-red-glow); }}
+            button {{ width: 100%; padding: 12px; background: linear-gradient(135deg, #cc1433, #ff1e42); color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; margin-top: 8px; text-transform: uppercase; font-size: 13px; letter-spacing: 0.5px; box-shadow: 0 0 12px var(--neon-red-glow); }}
+            button:active {{ transform: scale(0.98); }}
+            .btn-alt {{ background: #111b15 !important; color: #10b981 !important; border: 1px solid #064e3b !important; box-shadow: none !important; }}
+            .divider {{ text-align: center; margin: 15px 0; color: var(--text-muted); font-size: 11px; text-transform: uppercase; letter-spacing: 1px; }}
         </style>
     </head>
     <body>
         <div class="card">
-            <h2 style="text-align: center; margin-top: 0;">Вход в CRM</h2>
+            <h2>GHOSTCORE CRM</h2>
             {err_html}
             
             <form action="/login" method="POST">
@@ -57,7 +69,7 @@ def client_home(request: Request, error: str = None):
             
             <form action="/register" method="POST">
                 <input type="text" name="client_name" placeholder="Ваше Имя" required>
-                <button type="submit" style="background: #10b981;">Получить ключ и войти</button>
+                <button type="submit" class="btn-alt">Получить ключ и войти</button>
             </form>
         </div>
     </body>
@@ -118,7 +130,6 @@ def client_cabinet(request: Request):
     if not key_row:
         return RedirectResponse(url="/logout-client", status_code=303)
         
-    # Возвращаем твой красивый файл index.html в стиле Telegram вместо старого текста
     return FileResponse("index.html")
 
 @app.get("/cabinet/start-qr", response_class=HTMLResponse)
@@ -144,22 +155,93 @@ async def start_qr_auth(request: Request):
         <!DOCTYPE html>
         <html lang="ru">
         <head>
-            <meta charset="UTF-8"><title>Авторизация по QR</title>
+            <meta charset="UTF-8"><title>GHOSTCORE | QR Авторизация</title>
             <meta http-equiv="refresh" content="5">
             <style>
-                body {{ font-family: sans-serif; background: #0f172a; color: #f8fafc; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }}
-                .card {{ background: #1e293b; padding: 30px; border-radius: 8px; width: 320px; text-align: center; box-shadow: 0 4px 6px rgba(0,0,0,0.3); }}
-                img {{ background: white; padding: 10px; border-radius: 6px; margin: 15px 0; width: 200px; height: 200px; }}
-                .btn-back {{ display: inline-block; margin-top: 15px; color: #94a3b8; text-decoration: none; font-size: 14px; }}
+                :root {{
+                    --bg-color: #050507;
+                    --card-bg: #0f0f13;
+                    --neon-red: #ff1e42;
+                    --neon-red-glow: rgba(255, 30, 66, 0.4);
+                    --border-color: #261118;
+                    --text-main: #f3f4f6;
+                    --text-muted: #9ca3af;
+                }}
+                body {{ 
+                    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; 
+                    background: var(--bg-color); 
+                    color: var(--text-main); 
+                    display: flex; 
+                    justify-content: center; 
+                    align-items: center; 
+                    height: 100vh; 
+                    margin: 0; 
+                }}
+                .card {{ 
+                    background: var(--card-bg); 
+                    border: 1px solid var(--border-color);
+                    padding: 25px; 
+                    border-radius: 14px; 
+                    width: 320px; 
+                    text-align: center; 
+                    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.7); 
+                }}
+                h3 {{ 
+                    margin-top: 0; 
+                    font-size: 15px; 
+                    color: var(--text-main); 
+                    letter-spacing: 0.5px; 
+                    text-transform: uppercase; 
+                }}
+                img {{ 
+                    background: white; 
+                    padding: 10px; 
+                    border-radius: 8px; 
+                    margin: 15px 0; 
+                    width: 180px; 
+                    height: 180px; 
+                }}
+                .btn-action {{ 
+                    background: linear-gradient(135deg, #cc1433, #ff1e42);
+                    color: white; 
+                    border: none; 
+                    padding: 10px; 
+                    width: 100%; 
+                    border-radius: 8px; 
+                    cursor: pointer; 
+                    font-weight: bold; 
+                    font-size: 13px; 
+                    text-transform: uppercase;
+                    letter-spacing: 0.5px;
+                    box-shadow: 0 0 12px var(--neon-red-glow);
+                    text-decoration: none;
+                    display: inline-block;
+                    box-sizing: border-box;
+                    margin-top: 10px;
+                }}
+                .btn-back {{ 
+                    display: inline-block; 
+                    margin-top: 15px; 
+                    color: var(--text-muted); 
+                    text-decoration: none; 
+                    font-size: 12px; 
+                    text-transform: uppercase;
+                    letter-spacing: 0.5px;
+                }}
+                .btn-back:hover {{
+                    color: var(--text-main);
+                }}
             </style>
         </head>
         <body>
             <div class="card">
-                <h3 style="margin-top: 0;">Сканируйте QR-код</h3>
-                <p style="font-size: 13px; color: #94a3b8;">Откройте Telegram: <b>Настройки → Устройства → Подключить устройство</b></p>
+                <h3>Вход по QR-коду</h3>
+                <p style="font-size: 11px; color: var(--text-muted); text-transform: uppercase; line-height: 1.4;">
+                    Откройте Telegram:<br><b style="color: var(--text-main);">Настройки → Устройства → Подключить</b>
+                </p>
                 <img src="data:image/png;base64,{img_str}" alt="QR Code">
-                <p style="font-size: 12px; color: #facc15;">Ожидание сканирования...</p>
-                <a href="/cabinet/check-qr?sid={session_id}" style="display:inline-block; margin-top:10px; padding:8px 15px; background:#3b82f6; color:white; border-radius:4px; text-decoration:none; font-weight:bold; font-size:13px;">Проверить вход</a>
+                <p style="font-size: 11px; color: var(--neon-red); text-transform: uppercase; letter-spacing: 1px; font-weight: bold;">Ожидание сканирования...</p>
+                <a href="/cabinet/check-qr?sid={session_id}" class="btn-action">Проверить вход</a>
                 <br>
                 <a href="/cabinet" class="btn-back">← Назад в кабинет</a>
             </div>
