@@ -9,7 +9,7 @@ def init_db():
     db = get_db()
     cursor = db.cursor()
     
-    # Таблица ключей и клиентов
+    # Ключи доступа клиентов
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS access_keys (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -20,21 +20,23 @@ def init_db():
         )
     """)
     
-    # Таблица аккаунтов для парсера (телефоны/сессии)
+    # Аккаунты Telegram, которые добавляет сам клиент
     cursor.execute("""
-        CREATE TABLE IF NOT EXISTS parser_accounts (
+        CREATE TABLE IF NOT EXISTS client_tg_accounts (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
+            client_key TEXT NOT NULL,
             phone TEXT NOT NULL,
             session_name TEXT NOT NULL,
-            status TEXT DEFAULT 'active'
+            status TEXT DEFAULT 'pending_code'
         )
     """)
     
-    # История запросов парсинга от клиентов
+    # История задач (парсер, инвайтер, рассылки)
     cursor.execute("""
-        CREATE TABLE IF NOT EXISTS parse_tasks (
+        CREATE TABLE IF NOT EXISTS client_tasks (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             client_key TEXT NOT NULL,
+            task_type TEXT NOT NULL,
             target_link TEXT NOT NULL,
             result_text TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
