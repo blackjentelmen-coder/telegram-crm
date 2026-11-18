@@ -75,7 +75,7 @@ def admin_panel(request: Request):
             <td>
                 <form action="/admin/keys/delete" method="POST" style="margin:0;">
                     <input type="hidden" name="key_id" value="{k["id"]}">
-                    <button type="submit" style="padding:6px 10px; font-size:12px; margin:0; background:#ef4444; color:white; border:none; border-radius:4px; cursor:pointer;">Удалить</button>
+                    <button type="submit" style="padding:6px 10px; font-size:12px; background:#ef4444; color:white; border:none; border-radius:4px; cursor:pointer;">Удалить</button>
                 </form>
             </td>
         </tr>
@@ -103,8 +103,8 @@ def admin_panel(request: Request):
                 <h2>Управление ключами</h2>
                 <a href="/admin/logout" class="btn-logout">Выйти</a>
             </div>
-            <form action="/admin/keys/add" method="POST" style="margin-bottom: 20px; margin-top: 20px;">
-                <button type="submit" style="padding: 10px 15px; background: #3b82f6; color: white; border:none; border-radius:4px; cursor:pointer; font-weight:bold;">Сгенерировать ключ</button>
+            <form action="/admin/keys/add" method="POST" style="margin-top: 20px; margin-bottom: 20px;">
+                <button type="submit" style="padding: 10px 15px; background: #3b82f6; color: white; border:none; border-radius:4px; cursor:pointer; font-weight:bold;">Сгенерировать пустой ключ</button>
             </form>
             <table>
                 <tr><th>Ключ</th><th>Статус</th><th>Клиент</th><th>Действие</th></tr>
