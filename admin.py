@@ -23,12 +23,15 @@ def login_page(error: str = None):
     <!DOCTYPE html>
     <html lang="ru">
     <head>
-        <meta charset="UTF-8"><title>Вход в админку</title>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Вход в админку</title>
         <style>
-            body {{ font-family: sans-serif; background: #0f172a; color: #f8fafc; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }}
-            .login-box {{ background: #1e293b; padding: 30px; border-radius: 8px; width: 300px; box-shadow: 0 4px 6px rgba(0,0,0,0.3); }}
-            input {{ width: 100%; padding: 10px; margin: 10px 0; background: #0f172a; border: 1px solid #334155; color: white; border-radius: 4px; box-sizing: border-box; }}
-            button {{ width: 100%; padding: 10px; background: #3b82f6; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; }}
+            * {{ box-sizing: border-box; }}
+            body {{ font-family: sans-serif; background: #0f172a; color: #f8fafc; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; padding: 16px; }}
+            .login-box {{ background: #1e293b; padding: 24px; border-radius: 8px; width: 100%; max-width: 340px; box-shadow: 0 4px 6px rgba(0,0,0,0.3); }}
+            input {{ width: 100%; padding: 10px; margin: 10px 0; background: #0f172a; border: 1px solid #334155; color: white; border-radius: 4px; font-size: 14px; }}
+            button {{ width: 100%; padding: 10px; background: #3b82f6; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; font-size: 14px; }}
         </style>
     </head>
     <body>
@@ -91,13 +94,13 @@ def admin_panel(request: Request, message: str = None):
     for m in reversed(messages):
         chat_rows_html += f"""
         <tr>
-            <td><strong>{m["author"]}</strong></td>
+            <td class="nowrap"><strong>{m["author"]}</strong></td>
             <td>{m["text"]}</td>
-            <td style="white-space: nowrap; color: #94a3b8; font-size: 12px;">{m["created_at"]}</td>
-            <td>
+            <td class="nowrap" style="color: #94a3b8; font-size: 12px;">{m["created_at"]}</td>
+            <td class="nowrap">
                 <form action="/admin/chat/delete" method="POST" style="margin: 0;">
                     <input type="hidden" name="msg_id" value="{m["id"]}">
-                    <button type="submit" style="padding: 4px 8px; font-size: 12px; background: #ef4444; color: white; border: none; border-radius: 4px; cursor: pointer;">✕</button>
+                    <button type="submit" class="btn-sm-danger">✕</button>
                 </form>
             </td>
         </tr>
@@ -115,20 +118,20 @@ def admin_panel(request: Request, message: str = None):
 
         rows_html += f"""
         <tr>
-            <td><code>{k["key_code"]}</code></td>
-            <td><span class="{status_class}">{status_text}</span></td>
-            <td>{client_display}</td>
-            <td>
+            <td class="nowrap"><code>{k["key_code"]}</code></td>
+            <td class="nowrap"><span class="{status_class}">{status_text}</span></td>
+            <td class="nowrap">{client_display}</td>
+            <td class="nowrap">
                 <form action="/admin/keys/update-note" method="POST" style="display: flex; gap: 5px; margin: 0;">
                     <input type="hidden" name="key_id" value="{k["id"]}">
-                    <input type="text" name="note" value="{note_val}" placeholder="Заметка..." style="padding: 5px; background: #0f172a; border: 1px solid #334155; color: white; border-radius: 4px; font-size: 13px; width: 140px;">
-                    <button type="submit" style="padding: 5px 8px; font-size: 12px; background: #3b82f6; color: white; border: none; border-radius: 4px; cursor: pointer;">💾</button>
+                    <input type="text" name="note" value="{note_val}" placeholder="Заметка..." class="note-input">
+                    <button type="submit" class="btn-sm-blue">💾</button>
                 </form>
             </td>
-            <td>
+            <td class="nowrap">
                 <form action="/admin/keys/delete" method="POST" style="margin:0;">
                     <input type="hidden" name="key_id" value="{k["id"]}">
-                    <button type="submit" style="padding:6px 10px; font-size:12px; background:#ef4444; color:white; border:none; border-radius:4px; cursor:pointer;">Удалить</button>
+                    <button type="submit" class="btn-sm-danger">Удалить</button>
                 </form>
             </td>
         </tr>
@@ -148,18 +151,24 @@ def admin_panel(request: Request, message: str = None):
         <title>Админ-панель</title>
         <style>
             * {{ box-sizing: border-box; }}
-            body {{ font-family: sans-serif; background: #0f172a; color: #f8fafc; padding: 16px; margin: 0; }}
+            body {{ font-family: sans-serif; background: #0f172a; color: #f8fafc; padding: 12px; margin: 0; }}
             .container {{ max-width: 1000px; margin: 0 auto; }}
-            .panel-box {{ background: #1e293b; padding: 20px; border-radius: 8px; margin-bottom: 18px; }}
+            .panel-box {{ background: #1e293b; padding: 16px; border-radius: 8px; margin-bottom: 16px; }}
             .header {{ display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; }}
-            table {{ width: 100%; border-collapse: collapse; margin-top: 12px; }}
-            th, td {{ padding: 10px; border-bottom: 1px solid #334155; text-align: left; vertical-align: middle; word-break: break-word; }}
+            .table-wrap {{ width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; margin-top: 12px; }}
+            table {{ width: 100%; border-collapse: collapse; min-width: 520px; }}
+            th, td {{ padding: 10px 8px; border-bottom: 1px solid #334155; text-align: left; vertical-align: middle; }}
+            th {{ font-size: 12px; color: #94a3b8; text-transform: uppercase; }}
+            .nowrap {{ white-space: nowrap; }}
+            .note-input {{ padding: 6px 8px; background: #0f172a; border: 1px solid #334155; color: white; border-radius: 4px; font-size: 12px; width: 115px; }}
+            .btn-sm-blue {{ padding: 6px 8px; font-size: 12px; background: #3b82f6; color: white; border: none; border-radius: 4px; cursor: pointer; }}
+            .btn-sm-danger {{ padding: 6px 10px; font-size: 12px; background: #ef4444; color: white; border: none; border-radius: 4px; cursor: pointer; }}
             .tag-free {{ color: #4ade80; font-weight: bold; }}
             .tag-active {{ color: #f87171; font-weight: bold; }}
-            .btn-logout {{ background: #64748b; color: white; padding: 8px 12px; text-decoration: none; border-radius: 4px; font-size: 14px; }}
+            .btn-logout {{ background: #64748b; color: white; padding: 7px 12px; text-decoration: none; border-radius: 4px; font-size: 13px; white-space: nowrap; }}
             .field-input {{ width: 100%; padding: 9px 10px; margin: 6px 0 12px 0; background: #0f172a; border: 1px solid #334155; color: white; border-radius: 4px; font-size: 13px; }}
-            .btn-primary {{ padding: 10px 16px; background: #3b82f6; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; }}
-            .btn-danger {{ padding: 9px 14px; background: #ef4444; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; }}
+            .btn-primary {{ padding: 10px 16px; background: #3b82f6; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; font-size: 13px; }}
+            .btn-danger {{ padding: 9px 14px; background: #ef4444; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; font-size: 13px; }}
             label {{ font-size: 12px; color: #cbd5e1; display: block; }}
         </style>
     </head>
@@ -169,9 +178,9 @@ def admin_panel(request: Request, message: str = None):
 
             <div class="panel-box">
                 <div class="header">
-                    <h2 style="margin: 0;">Рекламный баннер на главной</h2>
+                    <h2 style="margin: 0; font-size: 18px;">Рекламный баннер на главной</h2>
                     <div style="display: flex; gap: 8px; align-items: center;">
-                        <a href="/" style="color: #93c5fd; font-size: 13px; text-decoration: none;">← На главную</a>
+                        <a href="/" style="color: #93c5fd; font-size: 13px; text-decoration: none; white-space: nowrap;">← На главную</a>
                         <a href="/admin/logout" class="btn-logout">Выйти</a>
                     </div>
                 </div>
@@ -207,26 +216,30 @@ def admin_panel(request: Request, message: str = None):
 
             <div class="panel-box">
                 <div class="header">
-                    <h2 style="margin: 0;">Модерация общего чата</h2>
+                    <h2 style="margin: 0; font-size: 18px;">Модерация общего чата</h2>
                     <form action="/admin/chat/clear" method="POST" style="margin: 0;">
                         <button type="submit" class="btn-danger">Очистить весь чат</button>
                     </form>
                 </div>
-                <table>
-                    <tr><th>Автор</th><th>Сообщение</th><th>Время</th><th></th></tr>
-                    {chat_rows_html}
-                </table>
+                <div class="table-wrap">
+                    <table>
+                        <tr><th>Автор</th><th>Сообщение</th><th>Время</th><th></th></tr>
+                        {chat_rows_html}
+                    </table>
+                </div>
             </div>
 
             <div class="panel-box">
-                <h2 style="margin-top: 0;">Управление ключами и клиентами</h2>
-                <form action="/admin/keys/add" method="POST" style="margin-top: 12px; margin-bottom: 16px;">
+                <h2 style="margin-top: 0; font-size: 18px;">Управление ключами и клиентами</h2>
+                <form action="/admin/keys/add" method="POST" style="margin-top: 12px; margin-bottom: 12px;">
                     <button type="submit" class="btn-primary">Сгенерировать пустой ключ</button>
                 </form>
-                <table>
-                    <tr><th>Ключ</th><th>Статус</th><th>Клиент</th><th>Заметка</th><th>Действие</th></tr>
-                    {rows_html}
-                </table>
+                <div class="table-wrap">
+                    <table>
+                        <tr><th>Ключ</th><th>Статус</th><th>Клиент</th><th>Заметка</th><th>Действие</th></tr>
+                        {rows_html}
+                    </table>
+                </div>
             </div>
         </div>
     </body>
