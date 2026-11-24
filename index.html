@@ -6,357 +6,506 @@
     <title>GHOSTCORE | Кабинет</title>
     <style>
         :root {
-            --bg-color: #050507;
-            --card-bg: #0f0f13;
+            --bg-main: #060609;
+            --panel-bg: #110b0e;
+            --panel-border: #4a121d;
             --neon-red: #ff1e42;
-            --neon-red-glow: rgba(255, 30, 66, 0.4);
-            --border-color: #261118;
-            --text-main: #f3f4f6;
-            --text-muted: #9ca3af;
+            --neon-red-soft: rgba(255, 30, 66, 0.28);
+            --green-btn: #0e241b;
+            --green-border: #14532d;
+            --green-text: #22c55e;
+            --text-main: #f5f5f7;
+            --text-muted: #9e969b;
         }
-        body { 
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; 
-            background: var(--bg-color); 
-            color: var(--text-main); 
-            margin: 0; 
-            padding: 12px; 
-            box-sizing: border-box; 
+        * { box-sizing: border-box; }
+        body {
+            margin: 0;
+            padding: 12px;
+            min-height: 100vh;
+            background: radial-gradient(circle at top, #18070c 0%, var(--bg-main) 65%);
+            color: var(--text-main);
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        }
+        .shell {
+            width: 100%;
+            max-width: 430px;
+            margin: 0 auto;
+        }
+
+        /* Верхняя шапка с 3 полосками слева */
+        .nav-bar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 8px 4px 14px 4px;
+            gap: 10px;
+        }
+        .nav-left {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .burger-btn {
+            width: 38px;
+            height: 38px;
+            background: #14090d;
+            border: 1.5px solid var(--panel-border);
+            border-radius: 8px;
             display: flex;
             flex-direction: column;
+            justify-content: center;
             align-items: center;
+            gap: 4px;
+            cursor: pointer;
+            padding: 0;
+            flex: 0 0 auto;
         }
-        .container {
-            width: 100%;
-            max-width: 360px;
-            box-sizing: border-box;
+        .burger-btn span {
+            width: 18px;
+            height: 2px;
+            background: var(--text-main);
+            border-radius: 2px;
         }
-        .card { 
-            background: var(--card-bg); 
-            border: 1px solid var(--border-color); 
-            padding: 16px; 
-            border-radius: 12px; 
-            margin-bottom: 12px; 
-            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.5); 
-            box-sizing: border-box;
+        .logo-title {
+            font-size: 19px;
+            font-weight: 800;
+            letter-spacing: 2px;
+            color: var(--neon-red);
+            text-shadow: 0 0 12px var(--neon-red-soft);
+            text-transform: uppercase;
         }
-        .card-header {
+        .exit-link {
+            padding: 7px 12px;
+            border-radius: 8px;
+            background: #151216;
+            border: 1px solid #2b2228;
+            color: var(--text-main);
+            text-decoration: none;
+            font-size: 12px;
+            font-weight: 600;
+            white-space: nowrap;
+        }
+
+        /* Выдвижное меню функций слева */
+        .drawer-mask {
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.72);
+            z-index: 80;
+            display: none;
+        }
+        .drawer-mask.open { display: block; }
+        .drawer {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 275px;
+            max-width: 82vw;
+            height: 100vh;
+            background: #0d080b;
+            border-right: 1.5px solid var(--panel-border);
+            z-index: 90;
+            padding: 16px;
+            transform: translateX(-100%);
+            transition: transform 0.2s ease;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            overflow-y: auto;
+        }
+        .drawer.open { transform: translateX(0); }
+        .drawer-top {
             display: flex;
             justify-content: space-between;
             align-items: center;
-            margin-bottom: 12px;
-            font-size: 13px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid var(--panel-border);
+        }
+        .drawer-close {
+            background: #1a0d12;
+            border: 1px solid var(--panel-border);
+            color: var(--text-main);
+            border-radius: 6px;
+            width: 28px;
+            height: 28px;
+            cursor: pointer;
+        }
+        .drawer-cap {
+            font-size: 10px;
             text-transform: uppercase;
             letter-spacing: 1px;
-            color: var(--neon-red);
-            font-weight: bold;
-        }
-        .logout-link {
             color: var(--text-muted);
-            text-decoration: none;
-            font-size: 10px;
-            border: 1px solid var(--border-color);
-            padding: 3px 8px;
-            border-radius: 6px;
+            margin-top: 8px;
         }
-        .logout-link:hover {
-            color: var(--neon-red);
+        .drawer-btn {
+            width: 100%;
+            text-align: left;
+            padding: 10px 12px;
+            border-radius: 8px;
+            background: #160c10;
+            border: 1px solid #351119;
+            color: var(--text-main);
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+            text-decoration: none;
+            display: block;
+        }
+        .drawer-btn.active, .drawer-btn:hover {
             border-color: var(--neon-red);
+            background: rgba(255, 30, 66, 0.14);
         }
-        label { 
-            display: block; 
-            font-size: 11px; 
-            color: var(--text-muted); 
-            margin-top: 8px; 
-            margin-bottom: 4px; 
-            text-transform: uppercase; 
-            letter-spacing: 0.5px; 
+
+        /* Карточки */
+        .frame-card {
+            background: var(--panel-bg);
+            border: 1.5px solid var(--panel-border);
+            border-radius: 12px;
+            padding: 14px;
+            margin-bottom: 12px;
+            box-shadow: inset 0 0 18px rgba(255, 30, 66, 0.06);
         }
-        input, textarea, select { 
-            width: 100%; 
-            padding: 9px 10px; 
-            background: #050507; 
-            border: 1px solid var(--border-color); 
-            color: white; 
-            border-radius: 8px; 
-            box-sizing: border-box; 
-            outline: none; 
-            font-size: 12px; 
-            margin-bottom: 6px;
-        }
-        input:focus, textarea:focus { 
-            border-color: var(--neon-red); 
-            box-shadow: 0 0 6px var(--neon-red-glow); 
-        }
-        button, .btn-action { 
-            width: 100%; 
-            padding: 10px; 
-            background: linear-gradient(135deg, #cc1433, #ff1e42); 
-            color: white; 
-            border: none; 
-            border-radius: 8px; 
-            cursor: pointer; 
-            font-weight: bold; 
-            margin-top: 6px; 
-            text-transform: uppercase; 
-            font-size: 11px; 
-            letter-spacing: 0.5px; 
-            box-shadow: 0 0 8px var(--neon-red-glow); 
-            text-align: center;
-            box-sizing: border-box;
-            text-decoration: none;
-            display: inline-block;
-        }
-        button:active { transform: scale(0.98); }
-        .btn-alt { 
-            background: #111b15 !important; 
-            color: #10b981 !important; 
-            border: 1px solid #064e3b !important; 
-            box-shadow: none !important; 
-        }
-        .tools-nav {
-            display: flex;
-            gap: 6px;
+        .frame-title {
+            font-size: 12px;
+            font-weight: 800;
+            letter-spacing: 1px;
+            text-transform: uppercase;
+            color: var(--text-main);
             margin-bottom: 10px;
         }
-        .tool-tab {
-            flex: 1;
-            padding: 8px 4px;
-            background: #050507;
-            border: 1px solid var(--border-color);
-            border-radius: 8px;
-            text-align: center;
-            font-size: 11px;
+        .field-label {
+            display: block;
+            font-size: 10px;
+            font-weight: 700;
+            letter-spacing: 0.8px;
             text-transform: uppercase;
             color: var(--text-muted);
-            cursor: pointer;
-            font-weight: bold;
+            margin: 10px 0 6px 0;
         }
-        .tool-tab.active {
-            border-color: var(--neon-red);
+        .field-box, .area-box, .select-box {
+            width: 100%;
+            padding: 10px 12px;
+            background: #14090d;
+            border: 1px solid #45121c;
+            border-radius: 8px;
             color: var(--text-main);
-            box-shadow: 0 0 8px var(--neon-red-glow);
+            font-size: 13px;
+            outline: none;
         }
-        .tool-panel { display: none; }
-        .tool-panel.active { display: block; }
-        .select-group {
-            display: flex;
-            gap: 6px;
-            margin-bottom: 6px;
-        }
-        .select-option {
-            flex: 1;
-            padding: 7px;
-            background: #050507;
-            border: 1px solid var(--border-color);
-            border-radius: 6px;
-            text-align: center;
-            font-size: 11px;
-            color: var(--text-muted);
-            cursor: pointer;
-            text-transform: uppercase;
-        }
-        .select-option.active {
+        .field-box:focus, .area-box:focus, .select-box:focus {
             border-color: var(--neon-red);
-            color: white;
-            background: #1a080d;
+            box-shadow: 0 0 8px var(--neon-red-soft);
         }
-        .msg-alert {
-            background: #1a080d;
-            border: 1px solid var(--neon-red);
-            padding: 8px;
+        .area-box {
+            min-height: 76px;
+            resize: vertical;
+            font-family: inherit;
+        }
+
+        .btn-red {
+            width: 100%;
+            padding: 11px 14px;
+            margin-top: 10px;
+            border: none;
             border-radius: 8px;
+            background: linear-gradient(135deg, #c71230, var(--neon-red));
+            color: #fff;
+            font-size: 12px;
+            font-weight: 800;
+            letter-spacing: 0.8px;
+            text-transform: uppercase;
+            cursor: pointer;
+            box-shadow: 0 0 12px var(--neon-red-soft);
+            display: block;
+            text-align: center;
+            text-decoration: none;
+        }
+        .btn-green {
+            width: 100%;
+            padding: 11px 14px;
+            margin-top: 8px;
+            border: 1px solid var(--green-border);
+            border-radius: 8px;
+            background: var(--green-btn);
+            color: var(--green-text);
+            font-size: 12px;
+            font-weight: 800;
+            letter-spacing: 0.8px;
+            text-transform: uppercase;
+            cursor: pointer;
+            display: block;
+            text-align: center;
+            text-decoration: none;
+        }
+        .or-divider {
+            text-align: center;
+            font-size: 10px;
+            letter-spacing: 1px;
+            text-transform: uppercase;
+            color: var(--text-muted);
+            margin: 10px 0 4px 0;
+        }
+
+        /* Переключатели функций внутри панели */
+        .tabs-row {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 8px;
             margin-bottom: 12px;
-            font-size: 11px;
-            text-align: center;
+        }
+        .tab-btn {
+            padding: 9px 6px;
+            border-radius: 8px;
+            background: #140a0e;
+            border: 1px solid #351119;
             color: var(--text-main);
+            font-size: 11px;
+            font-weight: 800;
+            text-transform: uppercase;
+            cursor: pointer;
+            white-space: nowrap;
+        }
+        .tab-btn.active {
+            border-color: var(--neon-red);
+            background: rgba(255, 30, 66, 0.14);
+            box-shadow: 0 0 10px var(--neon-red-soft);
+        }
+        .mode-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+        }
+        .mode-btn {
+            padding: 10px 8px;
+            border-radius: 8px;
+            background: #140a0e;
+            border: 1px solid #351119;
+            color: var(--text-main);
+            font-size: 11px;
+            font-weight: 700;
+            text-transform: uppercase;
+            cursor: pointer;
+            text-align: center;
+        }
+        .mode-btn.active {
+            border-color: var(--neon-red);
+            background: rgba(255, 30, 66, 0.14);
+        }
+        .two-cols {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+        }
+        .toast {
+            background: rgba(255, 30, 66, 0.15);
+            border: 1px solid var(--neon-red);
+            border-radius: 8px;
+            padding: 9px 12px;
+            font-size: 12px;
+            margin-bottom: 12px;
+            display: none;
         }
     </style>
 </head>
 <body>
-    <div class="container">
-        
-        <!-- Шапка -->
-        <div class="card" style="display: flex; justify-content: space-between; align-items: center; padding: 12px 16px;">
-            <div style="font-weight: bold; font-size: 14px; letter-spacing: 1px; color: var(--neon-red);">GHOSTCORE</div>
-            <a href="/logout-client" class="logout-link">Выйти</a>
+    <div id="drawer-mask" class="drawer-mask" onclick="closeDrawer()"></div>
+    <aside id="side-drawer" class="drawer">
+        <div class="drawer-top">
+            <span class="logo-title" style="font-size: 15px;">GHOSTCORE</span>
+            <button type="button" class="drawer-close" onclick="closeDrawer()">✕</button>
         </div>
 
-        <!-- Уведомления системы -->
-        <div id="alert-box" style="display: none;" class="msg-alert"></div>
+        <div class="drawer-cap">Функции кабинета</div>
+        <button type="button" id="menu-spammer" class="drawer-btn active" onclick="selectFunction('spammer'); closeDrawer();">🚀 Спамер</button>
+        <button type="button" id="menu-inviter" class="drawer-btn" onclick="selectFunction('inviter'); closeDrawer();">👥 Инвайтер</button>
+        <button type="button" id="menu-parser" class="drawer-btn" onclick="selectFunction('parser'); closeDrawer();">🔍 Парсер</button>
+        <button type="button" class="drawer-btn" onclick="focusAccounts(); closeDrawer();">📱 Telegram аккаунты</button>
 
-        <!-- Блок управления аккаунтами -->
-        <div class="card">
-            <div class="card-header">Telegram аккаунты</div>
-            
+        <div class="drawer-cap">Разделы сайта</div>
+        <a href="/" class="drawer-btn">🏠 Главная (Баннер и Чат)</a>
+        <a href="/admin" class="drawer-btn">⚙️ Админ-панель</a>
+        <a href="/logout-client" class="drawer-btn">🚪 Выйти</a>
+    </aside>
+
+    <div class="shell">
+        <header class="nav-bar">
+            <div class="nav-left">
+                <button type="button" class="burger-btn" aria-label="Меню" onclick="openDrawer()">
+                    <span></span>
+                    <span></span>
+                    <span></span>
+                </button>
+                <div class="logo-title">GHOSTCORE</div>
+            </div>
+            <a href="/logout-client" class="exit-link">Выйти</a>
+        </header>
+
+        <div id="status-toast" class="toast"></div>
+
+        <section id="accounts-section" class="frame-card">
+            <div class="frame-title">TELEGRAM АККАУНТЫ</div>
             <form action="/cabinet/add-account" method="POST">
-                <input type="text" name="phone" placeholder="+380..." required>
-                <button type="submit">Запросить SMS код</button>
+                <input type="text" name="phone" class="field-box" placeholder="+380..." required>
+                <button type="submit" class="btn-red">ЗАПРОСИТЬ SMS КОД</button>
             </form>
-            
-            <div style="text-align: center; margin: 8px 0; font-size: 10px; color: var(--text-muted); text-transform: uppercase;">или авторизация</div>
-            <a href="/cabinet/start-qr" class="btn-action btn-alt">Вход по QR-коду</a>
-        </div>
+            <div class="or-divider">ИЛИ АВТОРИЗАЦИЯ</div>
+            <a href="/cabinet/start-qr" class="btn-green">ВХОД ПО QR-КОДУ</a>
+        </section>
 
-        <!-- Панель инструментов -->
-        <div class="card">
-            <div class="card-header">Панель инструментов</div>
-            
-            <div class="tools-nav">
-                <div id="tab-spammer" class="tool-tab active" onclick="switchTool('spammer')">🚀 Спамер</div>
-                <div id="tab-inviter" class="tool-tab" onclick="switchTool('inviter')">👥 Инвайтер</div>
-                <div id="tab-parser" class="tool-tab" onclick="switchTool('parser')">🔍 Парсер</div>
+        <section class="frame-card">
+            <div class="frame-title">ПАНЕЛЬ ИНСТРУМЕНТОВ</div>
+
+            <div class="tabs-row">
+                <button type="button" id="tab-spammer" class="tab-btn active" onclick="selectFunction('spammer')">🚀 СПАМЕР</button>
+                <button type="button" id="tab-inviter" class="tab-btn" onclick="selectFunction('inviter')">👥 ИНВАЙТЕР</button>
+                <button type="button" id="tab-parser" class="tab-btn" onclick="selectFunction('parser')">🔍 ПАРСЕР</button>
             </div>
 
             <form action="/cabinet/run-task" method="POST">
-                <input type="hidden" name="task_type" id="task_type_input" value="spammer">
+                <input type="hidden" id="task_type" name="task_type" value="spammer">
+                <input type="hidden" id="target_type" name="target_type" value="chats">
+                <input type="hidden" id="spam_mode" name="spam_mode" value="text">
 
-                <!-- СПАМЕР -->
-                <div id="panel-spammer" class="tool-panel active">
-                    <label>База целей (чаты или люди через строку):</label>
-                    <textarea name="spam_targets" rows="3" placeholder="https://t.me/chat_target" required></textarea>
-                    
-                    <label>Тип цели:</label>
-                    <input type="hidden" name="target_type" id="target_type_input" value="chats">
-                    <div class="select-group">
-                        <div id="type-btn-chats" class="select-option active" onclick="setTargetType('chats')">💬 Чаты / Каналы</div>
-                        <div id="type-btn-people" class="select-option" onclick="setTargetType('people')">👤 Люди (ЛС/Телефоны)</div>
+                <div id="block-spammer">
+                    <label class="field-label">БАЗА ЦЕЛЕЙ (ЧАТЫ ИЛИ ЛЮДИ ЧЕРЕЗ СТРОКУ):</label>
+                    <textarea name="spam_targets" class="area-box" placeholder="https://t.me/chat_target"></textarea>
+
+                    <label class="field-label">ТИП ЦЕЛИ:</label>
+                    <div class="mode-grid">
+                        <button type="button" id="tt-chats" class="mode-btn active" onclick="setTargetType('chats')">💬 ЧАТЫ / КАНАЛЫ</button>
+                        <button type="button" id="tt-users" class="mode-btn" onclick="setTargetType('users')">👤 ЛЮДИ (ЛС/ТЕЛЕФОНЫ)</button>
                     </div>
 
-                    <label>Режим отправки:</label>
-                    <input type="hidden" name="spam_mode" id="spam_mode_input" value="text">
-                    <div class="select-group">
-                        <div id="mode-btn-text" class="select-option active" onclick="setSpamMode('text')">📝 Текст</div>
-                        <div id="mode-btn-forward" class="select-option" onclick="setSpamMode('forward')">🔄 Репост по ссылке</div>
+                    <label class="field-label">РЕЖИМ ОТПРАВКИ:</label>
+                    <div class="mode-grid">
+                        <button type="button" id="sm-text" class="mode-btn active" onclick="setSpamMode('text')">📝 ТЕКСТ</button>
+                        <button type="button" id="sm-forward" class="mode-btn" onclick="setSpamMode('forward')">🔁 РЕПОСТ ПО ССЫЛКЕ</button>
                     </div>
 
-                    <div id="spam-content-container">
-                        <label>Текст сообщения:</label>
-                        <textarea name="spam_texts[]" rows="2" placeholder="Текст рассылки..."></textarea>
+                    <div id="spam-text-box">
+                        <label class="field-label">ТЕКСТ СООБЩЕНИЯ:</label>
+                        <textarea name="spam_texts[]" class="area-box" placeholder="Текст рассылки..."></textarea>
                     </div>
 
-                    <label>Порядок рассылки:</label>
-                    <select name="spam_order">
+                    <div id="spam-forward-box" style="display: none;">
+                        <label class="field-label">ССЫЛКА НА ПОСТ ДЛЯ РЕПОСТА:</label>
+                        <input type="text" name="spam_links[]" class="field-box" placeholder="https://t.me/channel/123">
+                    </div>
+
+                    <label class="field-label">ПОРЯДОК РАССЫЛКИ:</label>
+                    <select name="spam_order" class="select-box">
                         <option value="sequential">Поочередно</option>
-                        <option value="rand">Вразнобой (Рандом)</option>
+                        <option value="random">Случайно</option>
                     </select>
 
-                    <div style="display: flex; gap: 8px;">
-                        <div style="flex: 1;">
-                            <label>Задержка (сек):</label>
-                            <input type="number" name="spam_delay" value="5" min="1">
+                    <div class="two-cols">
+                        <div>
+                            <label class="field-label">ЗАДЕРЖКА (СЕК):</label>
+                            <input type="number" name="spam_delay" class="field-box" value="5" min="1">
                         </div>
-                        <div style="flex: 1;">
-                            <label>Лимит на акк:</label>
-                            <input type="number" name="spam_limit" value="20" min="1">
-                        </div>
-                    </div>
-                </div>
-
-                <!-- ИНВАЙТЕР -->
-                <div id="panel-inviter" class="tool-panel">
-                    <label>Целевой чат (куда инвайтим):</label>
-                    <input type="text" name="inviter_target" placeholder="https://t.me/target_chat">
-
-                    <label>Чаты-доноры (если собираем оттуда):</label>
-                    <textarea name="inviter_sources" rows="2" placeholder="https://t.me/donor_chat"></textarea>
-
-                    <label>Или прямая база пользователей (текстом):</label>
-                    <textarea name="inviter_direct_users" rows="2" placeholder="@username1&#10;@username2"></textarea>
-
-                    <div style="display: flex; gap: 8px;">
-                        <div style="flex: 1;">
-                            <label>Лимит на акк:</label>
-                            <input type="number" name="inviter_limit" value="10" min="1">
-                        </div>
-                        <div style="flex: 1;">
-                            <label>Пауза мин/макс (с):</label>
-                            <input type="text" name="inviter_delay_min" value="10" style="margin-bottom: 2px;">
+                        <div>
+                            <label class="field-label">ЛИМИТ НА АКК:</label>
+                            <input type="number" name="spam_limit" class="field-box" value="20" min="1">
                         </div>
                     </div>
                 </div>
 
-                <!-- ПАРСЕР -->
-                <div id="panel-parser" class="tool-panel">
-                    <label>База чатов для парсинга:</label>
-                    <textarea name="parser_targets" rows="3" placeholder="https://t.me/target_chat"></textarea>
-                    
-                    <label>Режим сбора:</label>
-                    <input type="hidden" name="parser_mode" id="parser_mode_input" value="active">
+                <div id="block-inviter" style="display: none;">
+                    <label class="field-label">ЦЕЛЕВОЙ ЧАТ ДЛЯ ИНВАЙТА:</label>
+                    <input type="text" name="inviter_target" class="field-box" placeholder="https://t.me/your_chat">
 
-                    <div class="select-group">
-                        <div id="parser-btn-all" class="select-option" onclick="setParserMode('all')">📂 Все</div>
-                        <div id="parser-btn-active" class="select-option active" onclick="setParserMode('active')">⚡ Активные</div>
+                    <label class="field-label">ЧАТЫ-ДОНОРЫ (ЧЕРЕЗ СТРОКУ):</label>
+                    <textarea name="inviter_sources" class="area-box" placeholder="https://t.me/source_chat"></textarea>
+
+                    <label class="field-label">ПРЯМЫЙ СПИСОК ЮЗЕРНЕЙМОВ (ОПЦИОНАЛЬНО):</label>
+                    <textarea name="inviter_direct_users" class="area-box" placeholder="@username"></textarea>
+
+                    <div class="two-cols">
+                        <div>
+                            <label class="field-label">МИН. ЗАДЕРЖКА:</label>
+                            <input type="number" name="inviter_delay_min" class="field-box" value="10" min="1">
+                        </div>
+                        <div>
+                            <label class="field-label">МАКС. ЗАДЕРЖКА:</label>
+                            <input type="number" name="inviter_delay_max" class="field-box" value="20" min="1">
+                        </div>
                     </div>
-                    
-                    <div id="parser-limit-container">
-                        <label>Кол-во смс для обработки активных участников (кто писал):</label>
-                        <input type="number" name="parser_limit" value="500" min="50" max="5000">
-                    </div>
+
+                    <label class="field-label">ЛИМИТ НА АККАУНТ:</label>
+                    <input type="number" name="inviter_limit" class="field-box" value="10" min="1">
                 </div>
 
-                <button type="submit" style="margin-top: 12px;">Запустить в работу</button>
+                <div id="block-parser" style="display: none;">
+                    <label class="field-label">ЧАТЫ ДЛЯ ПАРСИНГА (ЧЕРЕЗ СТРОКУ):</label>
+                    <textarea name="parser_targets" class="area-box" placeholder="https://t.me/target_chat"></textarea>
+
+                    <label class="field-label">РЕЖИМ ПАРСИНГА:</label>
+                    <select name="parser_mode" class="select-box">
+                        <option value="active">Активные участники</option>
+                        <option value="all">Все участники</option>
+                    </select>
+
+                    <label class="field-label">ЛИМИТ ПОЛЬЗОВАТЕЛЕЙ:</label>
+                    <input type="number" name="parser_limit" class="field-box" value="500" min="1">
+                </div>
+
+                <button type="submit" class="btn-red" style="margin-top: 14px;">ЗАПУСТИТЬ ЗАДАЧУ</button>
             </form>
-        </div>
-
-        <!-- История задач -->
-        <div class="card">
-            <div class="card-header">История задач</div>
-            <div id="tasks-history" style="font-size: 11px; color: var(--text-muted); text-align: center; padding: 6px;">
-                Ожидание запусков...
-            </div>
-        </div>
-
+        </section>
     </div>
 
     <script>
-        function switchTool(toolName) {
-            document.querySelectorAll('.tool-tab').forEach(t => t.classList.remove('active'));
-            document.querySelectorAll('.tool-panel').forEach(p => p.classList.remove('active'));
+        const drawer = document.getElementById("side-drawer");
+        const mask = document.getElementById("drawer-mask");
 
-            document.getElementById('tab-' + toolName).classList.add('active');
-            document.getElementById('panel-' + toolName).classList.add('active');
-            document.getElementById('task_type_input').value = toolName;
+        function openDrawer() {
+            drawer.classList.add("open");
+            mask.classList.add("open");
+        }
+        function closeDrawer() {
+            drawer.classList.remove("open");
+            mask.classList.remove("open");
+        }
+        function focusAccounts() {
+            document.getElementById("accounts-section").scrollIntoView({ behavior: "smooth" });
         }
 
-        function setTargetType(type) {
-            document.getElementById('target_type_input').value = type;
-            document.getElementById('type-btn-chats').classList.toggle('active', type === 'chats');
-            document.getElementById('type-btn-people').classList.toggle('active', type === 'people');
+        function selectFunction(fn) {
+            document.getElementById("task_type").value = fn;
+
+            ["spammer", "inviter", "parser"].forEach(name => {
+                document.getElementById("block-" + name).style.display = (name === fn) ? "block" : "none";
+                document.getElementById("tab-" + name).classList.toggle("active", name === fn);
+                const menuItem = document.getElementById("menu-" + name);
+                if (menuItem) menuItem.classList.toggle("active", name === fn);
+            });
         }
 
-        function setSpamMode(mode) {
-            document.getElementById('spam_mode_input').value = mode;
-            document.getElementById('mode-btn-text').classList.toggle('active', mode === 'text');
-            document.getElementById('mode-btn-forward').classList.toggle('active', mode === 'forward');
-
-            const container = document.getElementById('spam-content-container');
-            if (mode === 'text') {
-                container.innerHTML = '<label>Текст сообщения:</label><textarea name="spam_texts[]" rows="2" placeholder="Текст рассылки..."></textarea>';
-            } else {
-                container.innerHTML = '<label>Ссылки на посты (репост):</label><textarea name="spam_links[]" rows="2" placeholder="https://t.me/channel/123"></textarea>';
-            }
+        function setTargetType(val) {
+            document.getElementById("target_type").value = val;
+            document.getElementById("tt-chats").classList.toggle("active", val === "chats");
+            document.getElementById("tt-users").classList.toggle("active", val === "users");
         }
 
-        function setParserMode(mode) {
-            document.getElementById('parser_mode_input').value = mode;
-            document.getElementById('parser-btn-all').classList.toggle('active', mode === 'all');
-            document.getElementById('parser-btn-active').classList.toggle('active', mode === 'active');
-
-            const limitContainer = document.getElementById('parser-limit-container');
-            if (mode === 'all') {
-                limitContainer.style.display = 'none';
-            } else {
-                limitContainer.style.display = 'block';
-            }
+        function setSpamMode(val) {
+            document.getElementById("spam_mode").value = val;
+            document.getElementById("sm-text").classList.toggle("active", val === "text");
+            document.getElementById("sm-forward").classList.toggle("active", val === "forward");
+            document.getElementById("spam-text-box").style.display = (val === "text") ? "block" : "none";
+            document.getElementById("spam-forward-box").style.display = (val === "forward") ? "block" : "none";
         }
 
-        const urlParams = new URLSearchParams(window.location.search);
-        const msg = urlParams.get('message');
+        const params = new URLSearchParams(window.location.search);
+        const msg = params.get("message");
         if (msg) {
-            const alertBox = document.getElementById('alert-box');
-            alertBox.innerText = msg;
-            alertBox.style.display = 'block';
+            const toast = document.getElementById("status-toast");
+            toast.textContent = msg;
+            toast.style.display = "block";
         }
+
+        if (window.location.hash === "#inviter") selectFunction("inviter");
+        if (window.location.hash === "#parser") selectFunction("parser");
+        if (window.location.hash === "#spammer") selectFunction("spammer");
     </script>
 </body>
 </html>
