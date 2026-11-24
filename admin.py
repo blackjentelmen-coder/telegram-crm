@@ -2,12 +2,11 @@ import os
 import shutil
 import uuid
 import time
+import sqlite3
 from fastapi import APIRouter, Form, Request, UploadFile, File
 from fastapi.responses import HTMLResponse, RedirectResponse
 from database import (
     get_db,
-    get_banner,
-    update_banner_db,
     get_recent_chat_messages,
 )
 
@@ -23,7 +22,7 @@ def is_admin_logged_in(request: Request) -> bool:
     return request.cookies.get(ADMIN_COOKIE_NAME) == ADMIN_COOKIE_VALUE
 
 
-def init_banners_table_safe():
+def ensure_admin_schema():
     db = get_db()
     db.execute(
         """
@@ -39,12 +38,20 @@ def init_banners_table_safe():
         )
         """
     )
+    cols = [row["name"] for row in db.execute("PRAGMA table_info(access_keys)").fetchall()]
+    if "is_muted" not in cols:
+        db.execute("ALTER TABLE access_keys ADD COLUMN is_muted INTEGER NOT NULL DEFAULT 0")
+    if "admin_note" not in cols:
+        db.execute("ALTER TABLE access_keys ADD COLUMN admin_note TEXT NOT NULL DEFAULT ''")
     db.commit()
     db.close()
 
 
+ensure_admin_schema()
+
+
 def fetch_banners_list() -> list:
-    init_banners_table_safe()
+    ensure_admin_schema()
     db = get_db()
     rows = db.execute(
         """
@@ -55,6 +62,51 @@ def fetch_banners_list() -> list:
     ).fetchall()
     db.close()
     return [dict(r) for r in rows]
+
+
+def fetch_users_with_messages() -> list:
+    ensure_admin_schema()
+    db = get_db()
+    users = [
+        dict(r)
+        for r in db.execute(
+            """
+            SELECT id, key_code, client_name, status, status_text, is_muted, admin_note
+            FROM access_keys
+            ORDER BY id DESC
+            """
+        ).fetchall()
+    ]
+
+    all_msgs = []
+    try:
+        all_msgs = [
+            dict(r)
+            for r in db.execute(
+                """
+                SELECT id, author, text, created_at
+                FROM chat_messages
+                ORDER BY id DESC
+                LIMIT 200
+                """
+            ).fetchall()
+        ]
+    except sqlite3.OperationalError:
+        recent = get_recent_chat_messages(limit=200)
+        all_msgs = list(reversed(recent)) if recent else []
+    db.close()
+
+    for u in users:
+        name = (u.get("client_name") or "").strip().lower()
+        key = (u.get("key_code") or "").strip().lower()
+        user_msgs = []
+        for m in all_msgs:
+            author_low = (m.get("author") or "").strip().lower()
+            if (name and author_low == name) or (key and author_low == key):
+                user_msgs.append(m)
+        u["messages"] = user_msgs[:15]
+
+    return users
 
 
 def render_admin_login(error: str = "") -> str:
@@ -120,9 +172,7 @@ def render_admin_login(error: str = "") -> str:
                 font-size: 13px;
                 outline: none;
             }}
-            .field:focus {{
-                border-color: var(--red);
-            }}
+            .field:focus {{ border-color: var(--red); }}
             .btn {{
                 width: 100%;
                 padding: 11px;
@@ -155,7 +205,7 @@ def render_admin_login(error: str = "") -> str:
     <body>
         <form class="card" action="/admin/login" method="POST">
             <h1>GHOSTCORE ADMIN</h1>
-            <p>Авторизация для управления баннерами, таймерами и чатом</p>
+            <p>Авторизация для управления пользователями, баннерами и чатом</p>
             {err_block}
             <input type="text" name="login" class="field" placeholder="Логин" required>
             <input type="password" name="password" class="field" placeholder="Пароль" required>
@@ -183,16 +233,150 @@ def admin_logout():
     return resp
 
 
+@router.post("/admin/users/toggle-ban")
+def admin_toggle_user_ban(request: Request, user_id: int = Form(...)):
+    if not is_admin_logged_in(request):
+        return RedirectResponse(url="/admin", status_code=303)
+    ensure_admin_schema()
+    db = get_db()
+    row = db.execute("SELECT status FROM access_keys WHERE id = ?", (user_id,)).fetchone()
+    if row:
+        next_status = "active" if row["status"] == "banned" else "banned"
+        db.execute("UPDATE access_keys SET status = ? WHERE id = ?", (next_status, user_id))
+        db.commit()
+    db.close()
+    return RedirectResponse(url="/admin?message=Статус+бана+обновлён#users", status_code=303)
+
+
+@router.post("/admin/users/toggle-mute")
+def admin_toggle_user_mute(request: Request, user_id: int = Form(...)):
+    if not is_admin_logged_in(request):
+        return RedirectResponse(url="/admin", status_code=303)
+    ensure_admin_schema()
+    db = get_db()
+    row = db.execute("SELECT is_muted FROM access_keys WHERE id = ?", (user_id,)).fetchone()
+    if row:
+        next_muted = 0 if int(row["is_muted"] or 0) == 1 else 1
+        db.execute("UPDATE access_keys SET is_muted = ? WHERE id = ?", (next_muted, user_id))
+        db.commit()
+    db.close()
+    return RedirectResponse(url="/admin?message=Статус+мута+в+чате+обновлён#users", status_code=303)
+
+
+@router.post("/admin/users/note")
+def admin_save_user_note(request: Request, user_id: int = Form(...), admin_note: str = Form("")):
+    if not is_admin_logged_in(request):
+        return RedirectResponse(url="/admin", status_code=303)
+    ensure_admin_schema()
+    db = get_db()
+    db.execute(
+        "UPDATE access_keys SET admin_note = ? WHERE id = ?",
+        (admin_note.strip()[:500], user_id),
+    )
+    db.commit()
+    db.close()
+    return RedirectResponse(url="/admin?message=Заметка+сохранена#users", status_code=303)
+
+
+@router.post("/admin/users/delete")
+def admin_delete_user(request: Request, user_id: int = Form(...)):
+    if not is_admin_logged_in(request):
+        return RedirectResponse(url="/admin", status_code=303)
+    ensure_admin_schema()
+    db = get_db()
+    db.execute("DELETE FROM access_keys WHERE id = ?", (user_id,))
+    db.commit()
+    db.close()
+    return RedirectResponse(url="/admin?message=Пользователь+удалён#users", status_code=303)
+
+
 @router.get("/admin", response_class=HTMLResponse)
 def admin_dashboard(request: Request, message: str = ""):
     if not is_admin_logged_in(request):
         return HTMLResponse(content=render_admin_login())
 
     banners = fetch_banners_list()
+    users = fetch_users_with_messages()
     messages = get_recent_chat_messages(limit=30)
-    current_legacy = get_banner()
 
     msg_html = f'<div class="notice">{message}</div>' if message else ""
+
+    users_html = ""
+    if not users:
+        users_html = '<div class="empty">Пользователей и ключей пока нет.</div>'
+    else:
+        for u in users:
+            u_name = u.get("client_name") or "Без имени"
+            u_key = u.get("key_code") or "—"
+            is_banned = (u.get("status") == "banned")
+            is_muted = int(u.get("is_muted") or 0) == 1
+            note_val = u.get("admin_note") or ""
+
+            ban_badge = (
+                '<span class="badge badge-danger">ЗАБАНЕН</span>'
+                if is_banned
+                else '<span class="badge badge-on">АКТИВЕН</span>'
+            )
+            mute_badge = (
+                '<span class="badge badge-warn">В МУТЕ</span>'
+                if is_muted
+                else '<span class="badge badge-off">ЧАТ ОК</span>'
+            )
+
+            u_msgs = u.get("messages") or []
+            if not u_msgs:
+                msgs_block = '<div class="u-msg-empty">Сообщений в чате не найдено.</div>'
+            else:
+                items_str = "".join(
+                    f'<div class="u-msg-line">• {m.get("text") or ""}</div>'
+                    for m in u_msgs
+                )
+                msgs_block = f'<div class="u-msg-box">{items_str}</div>'
+
+            users_html += f"""
+            <div class="u-card">
+                <div class="u-top">
+                    <div>
+                        <div class="u-name">{u_name}</div>
+                        <div class="u-key">Ключ: <code>{u_key}</code></div>
+                    </div>
+                    <div class="u-badges">
+                        {ban_badge}
+                        {mute_badge}
+                    </div>
+                </div>
+
+                <div class="u-actions">
+                    <form action="/admin/users/toggle-ban" method="POST" style="margin:0;">
+                        <input type="hidden" name="user_id" value="{u["id"]}">
+                        <button type="submit" class="btn-sm btn-danger">
+                            {"Разбанить" if is_banned else "Забанить"}
+                        </button>
+                    </form>
+                    <form action="/admin/users/toggle-mute" method="POST" style="margin:0;">
+                        <input type="hidden" name="user_id" value="{u["id"]}">
+                        <button type="submit" class="btn-sm btn-warn">
+                            {"Размутить" if is_muted else "Замутить в чате"}
+                        </button>
+                    </form>
+                    <form action="/admin/users/delete" method="POST" style="margin:0;">
+                        <input type="hidden" name="user_id" value="{u["id"]}">
+                        <button type="submit" class="btn-sm btn-ghost">Удалить</button>
+                    </form>
+                </div>
+
+                <form action="/admin/users/note" method="POST" class="u-note-form">
+                    <input type="hidden" name="user_id" value="{u["id"]}">
+                    <input type="text" name="admin_note" class="field-mini" value="{note_val}" placeholder="Заметка о пользователе...">
+                    <button type="submit" class="btn-sm btn-ghost">Сохранить</button>
+                </form>
+
+                <details class="u-details">
+                    <summary class="u-summary">СМС пользователя в чате ({len(u_msgs)})</summary>
+                    {msgs_block}
+                </details>
+            </div>
+            """
 
     banner_rows_html = ""
     if not banners:
@@ -299,10 +483,7 @@ def admin_dashboard(request: Request, message: str = ""):
                 color: var(--red);
                 text-transform: uppercase;
             }}
-            .top-links {{
-                display: flex;
-                gap: 8px;
-            }}
+            .top-links {{ display: flex; gap: 8px; }}
             .card {{
                 background: var(--panel);
                 border: 1.5px solid var(--border);
@@ -329,8 +510,15 @@ def admin_dashboard(request: Request, message: str = ""):
                 font-size: 13px;
                 outline: none;
             }}
-            .field:focus {{
-                border-color: var(--red);
+            .field-mini {{
+                flex: 1;
+                padding: 7px 10px;
+                background: #15090e;
+                border: 1px solid #4a121d;
+                border-radius: 7px;
+                color: var(--text);
+                font-size: 12px;
+                outline: none;
             }}
             .row-2 {{
                 display: grid;
@@ -370,7 +558,7 @@ def admin_dashboard(request: Request, message: str = ""):
                 display: inline-flex;
                 align-items: center;
                 justify-content: center;
-                padding: 8px 11px;
+                padding: 7px 10px;
                 border-radius: 8px;
                 background: #180c11;
                 border: 1px solid var(--border);
@@ -393,29 +581,89 @@ def admin_dashboard(request: Request, message: str = ""):
                 border-color: var(--red);
                 color: #ff8fa3;
             }}
-            .b-row {{
+            .btn-warn {{
+                background: rgba(245, 158, 11, 0.16);
+                border-color: rgba(245, 158, 11, 0.55);
+                color: #fcd34d;
+            }}
+            .u-card, .b-row {{
                 background: #0c070a;
                 border: 1px solid #2e1018;
                 border-radius: 9px;
                 padding: 10px;
                 margin-bottom: 8px;
             }}
-            .b-head {{
+            .u-top, .b-head {{
                 display: flex;
-                align-items: center;
+                align-items: flex-start;
                 justify-content: space-between;
                 gap: 8px;
-                margin-bottom: 5px;
+                margin-bottom: 6px;
             }}
-            .b-title {{
+            .u-name, .b-title {{
                 font-size: 13px;
                 font-weight: 800;
                 color: var(--text);
             }}
-            .b-meta {{
+            .u-key {{
+                font-size: 11px;
+                color: var(--muted);
+                margin-top: 2px;
+            }}
+            .u-key code {{
+                color: #ffb3c1;
+                background: #1a0c12;
+                padding: 1px 5px;
+                border-radius: 4px;
+            }}
+            .u-badges, .b-meta {{
                 display: flex;
                 align-items: center;
+                gap: 5px;
+                flex-wrap: wrap;
+            }}
+            .u-actions, .b-actions {{
+                display: flex;
                 gap: 6px;
+                flex-wrap: wrap;
+                margin-top: 6px;
+            }}
+            .u-note-form {{
+                display: flex;
+                gap: 6px;
+                margin-top: 8px;
+            }}
+            .u-details {{
+                margin-top: 8px;
+                border-top: 1px solid #230d13;
+                padding-top: 6px;
+            }}
+            .u-summary {{
+                cursor: pointer;
+                font-size: 11px;
+                font-weight: 700;
+                color: var(--muted);
+                list-style: none;
+            }}
+            .u-msg-box {{
+                margin-top: 6px;
+                max-height: 130px;
+                overflow-y: auto;
+                background: #14090e;
+                border: 1px solid #2a0f16;
+                border-radius: 7px;
+                padding: 6px 8px;
+            }}
+            .u-msg-line {{
+                font-size: 11px;
+                color: #e6d6da;
+                padding: 2px 0;
+                word-break: break-word;
+            }}
+            .u-msg-empty {{
+                font-size: 11px;
+                color: var(--muted);
+                margin-top: 4px;
             }}
             .timer-chip {{
                 font-size: 10px;
@@ -437,22 +685,23 @@ def admin_dashboard(request: Request, message: str = ""):
                 color: #86efac;
                 border: 1px solid rgba(34, 197, 94, 0.35);
             }}
+            .badge-warn {{
+                background: rgba(245, 158, 11, 0.16);
+                color: #fcd34d;
+                border: 1px solid rgba(245, 158, 11, 0.4);
+            }}
+            .badge-danger {{
+                background: rgba(255, 30, 66, 0.18);
+                color: #ff8fa3;
+                border: 1px solid rgba(255, 30, 66, 0.45);
+            }}
             .badge-off {{
                 background: rgba(158, 150, 155, 0.14);
                 color: var(--muted);
                 border: 1px solid #352b30;
             }}
-            .b-text {{
-                font-size: 12px;
-                color: #e4d4d8;
-                margin-bottom: 4px;
-            }}
-            .b-url {{
-                font-size: 11px;
-                color: var(--muted);
-                word-break: break-all;
-                margin-bottom: 6px;
-            }}
+            .b-text {{ font-size: 12px; color: #e4d4d8; margin-bottom: 4px; }}
+            .b-url {{ font-size: 11px; color: var(--muted); word-break: break-all; margin-bottom: 6px; }}
             .mini-thumb {{
                 width: 100%;
                 max-height: 110px;
@@ -460,11 +709,6 @@ def admin_dashboard(request: Request, message: str = ""):
                 border-radius: 7px;
                 margin-bottom: 6px;
                 border: 1px solid #2e1018;
-            }}
-            .b-actions {{
-                display: flex;
-                gap: 8px;
-                margin-top: 6px;
             }}
             .msg-row {{
                 display: flex;
@@ -478,11 +722,7 @@ def admin_dashboard(request: Request, message: str = ""):
                 margin-bottom: 6px;
                 font-size: 12px;
             }}
-            .msg-nick {{
-                color: var(--red);
-                font-weight: 700;
-                margin-right: 4px;
-            }}
+            .msg-nick {{ color: var(--red); font-weight: 700; margin-right: 4px; }}
             .notice {{
                 background: rgba(255, 30, 66, 0.14);
                 border: 1px solid var(--red);
@@ -492,10 +732,7 @@ def admin_dashboard(request: Request, message: str = ""):
                 font-size: 12px;
                 margin-bottom: 10px;
             }}
-            .empty {{
-                font-size: 12px;
-                color: var(--muted);
-            }}
+            .empty {{ font-size: 12px; color: var(--muted); }}
         </style>
     </head>
     <body>
@@ -509,6 +746,11 @@ def admin_dashboard(request: Request, message: str = ""):
             </div>
 
             {msg_html}
+
+            <section id="users" class="card">
+                <div class="card-title">Пользователи и ключи ({len(users)})</div>
+                {users_html}
+            </section>
 
             <section class="card">
                 <div class="card-title">Добавить баннер в ротацию</div>
