@@ -95,6 +95,29 @@ def api_home_data(request: Request):
     })
 
 
+@app.post("/home/banner/quick-add")
+async def home_quick_add_banner(request: Request):
+    client_key = request.cookies.get("client_session")
+    if not get_authorized_client(client_key):
+        return RedirectResponse(url="/", status_code=303)
+
+    form = await request.form()
+    title = str(form.get("title", "BANNER")).strip() or "BANNER"
+    text = str(form.get("text", "")).strip()
+    url = str(form.get("url", "")).strip()
+    current = get_banner()
+    image_url = current.get("image_url", "")
+
+    update_banner_db(
+        is_active=True,
+        title=title,
+        text=text,
+        url=url,
+        image_url=image_url,
+    )
+    return RedirectResponse(url="/", status_code=303)
+
+
 @app.get("/api/profile")
 def api_get_profile(request: Request):
     client_key = request.cookies.get("client_session")
@@ -239,8 +262,26 @@ def home_page(request: Request, error: str = None):
         """
         if is_auth else
         """
-        <a href="#access-panel" class="drawer-link drawer-hot" onclick="closeDrawer()">Вход / Регистрация</a>
+        <a href="#guest-auth" class="drawer-link drawer-hot" onclick="closeDrawer()">Вход / Регистрация</a>
         """
+    )
+
+    banner_creator_html = (
+        """
+        <details class="banner-adder">
+            <summary class="banner-add-btn">+ ADD BANNER</summary>
+            <form action="/home/banner/quick-add" method="POST" class="banner-form">
+                <input type="text" name="title" class="field-box" placeholder="Заголовок баннера" required>
+                <input type="text" name="text" class="field-box" placeholder="Текст баннера" required>
+                <input type="text" name="url" class="field-box" placeholder="Ссылка (необязательно)">
+                <div class="banner-form-actions">
+                    <button type="submit" class="btn-submit" style="flex:1;">ПОКАЗАТЬ СВЕРХУ</button>
+                    <a href="/admin" class="btn-ghost">АДМИНКА</a>
+                </div>
+            </form>
+        </details>
+        """
+        if is_auth else ""
     )
 
     chat_section_html = (
@@ -254,31 +295,21 @@ def home_page(request: Request, error: str = None):
             </form>
         </section>
         """
-        if is_auth else ""
-    )
-
-    user_status_line = f' • <span>{user.get("status_text")}</span>' if (is_auth and user.get("status_text")) else ""
-
-    access_block_html = (
-        f"""
-        <div class="user-badge">АККАУНТ: <b>{user.get("client_name") or user["key_code"]}</b>{user_status_line}</div>
-        <div class="btn-pair">
-            <a href="/cabinet" class="btn-submit" style="text-decoration:none;flex:1 1 auto;">OPEN CABINET</a>
-            <a href="/logout-client" class="btn-ghost" style="text-decoration:none;flex:0 0 auto;">EXIT</a>
-        </div>
-        """
         if is_auth else
         f"""
-        {err_html}
-        <form action="/login" method="POST" style="margin-bottom: 10px;">
-            <input type="text" name="key_code" class="field-box" placeholder="KEY CODE" required style="text-transform: uppercase;">
-            <button type="submit" class="btn-submit" style="width: 100%; margin-top: 8px;">SUBMIT ACCESS</button>
-        </form>
-        <div class="or-line">OR REGISTER NEW KEY</div>
-        <form action="/register" method="POST">
-            <input type="text" name="client_name" class="field-box" placeholder="YOUR NAME" required>
-            <button type="submit" class="btn-ghost" style="width: 100%; margin-top: 8px;">REGISTER & GET KEY</button>
-        </form>
+        <section id="guest-auth" class="frame-card">
+            <div class="frame-title">SECURE ACCESS</div>
+            {err_html}
+            <form action="/login" method="POST" style="margin-bottom: 10px;">
+                <input type="text" name="key_code" class="field-box" placeholder="KEY CODE" required style="text-transform: uppercase;">
+                <button type="submit" class="btn-submit" style="width: 100%; margin-top: 8px;">SUBMIT ACCESS</button>
+            </form>
+            <div class="or-line">OR REGISTER NEW KEY</div>
+            <form action="/register" method="POST">
+                <input type="text" name="client_name" class="field-box" placeholder="YOUR NAME" required>
+                <button type="submit" class="btn-ghost" style="width: 100%; margin-top: 8px;">REGISTER & GET KEY</button>
+            </form>
+        </section>
         """
     )
 
@@ -513,6 +544,9 @@ def home_page(request: Request, error: str = None):
                 background: rgba(255, 30, 66, 0.14);
             }}
             .drawer-dim {{ color: var(--text-muted); }}
+            .top-zone {{
+                margin-bottom: 12px;
+            }}
             .banner-card {{
                 display: none;
                 position: relative;
@@ -523,20 +557,20 @@ def home_page(request: Request, error: str = None):
                 background: #13080c;
                 text-decoration: none;
                 color: var(--text-main);
-                margin-bottom: 12px;
+                margin-bottom: 8px;
             }}
             .banner-img {{
                 width: 100%;
-                max-height: 175px;
+                max-height: 170px;
                 object-fit: cover;
                 display: none;
             }}
             .banner-overlay {{
-                padding: 12px 14px;
+                padding: 11px 13px;
                 background: linear-gradient(90deg, rgba(12, 5, 8, 0.92) 0%, rgba(12, 5, 8, 0.55) 100%);
             }}
             .banner-title {{
-                font-size: 14px;
+                font-size: 13px;
                 font-weight: 800;
                 letter-spacing: 0.8px;
                 text-transform: uppercase;
@@ -546,6 +580,36 @@ def home_page(request: Request, error: str = None):
                 font-size: 12px;
                 color: #e5d4d8;
                 margin-top: 3px;
+            }}
+            .banner-adder {{
+                background: var(--panel-bg);
+                border: 1px solid var(--panel-border);
+                border-radius: 10px;
+                padding: 8px 10px;
+            }}
+            .banner-add-btn {{
+                list-style: none;
+                cursor: pointer;
+                font-size: 11px;
+                font-weight: 800;
+                letter-spacing: 0.9px;
+                text-transform: uppercase;
+                color: var(--neon-red);
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+            }}
+            .banner-add-btn::-webkit-details-marker {{ display: none; }}
+            .banner-form {{
+                margin-top: 8px;
+                display: flex;
+                flex-direction: column;
+                gap: 7px;
+            }}
+            .banner-form-actions {{
+                display: flex;
+                gap: 8px;
+                margin-top: 2px;
             }}
             .frame-card {{
                 background: var(--panel-bg);
@@ -564,8 +628,8 @@ def home_page(request: Request, error: str = None):
                 margin-bottom: 10px;
             }}
             .tx-list {{
-                min-height: 140px;
-                max-height: 240px;
+                min-height: 180px;
+                max-height: 320px;
                 overflow-y: auto;
                 display: flex;
                 flex-direction: column;
@@ -638,6 +702,7 @@ def home_page(request: Request, error: str = None):
                 cursor: pointer;
                 box-shadow: 0 0 12px var(--neon-red-soft);
                 white-space: nowrap;
+                text-decoration: none;
             }}
             .btn-ghost {{
                 display: inline-flex;
@@ -654,16 +719,7 @@ def home_page(request: Request, error: str = None):
                 text-transform: uppercase;
                 cursor: pointer;
                 white-space: nowrap;
-            }}
-            .btn-pair {{
-                display: flex;
-                gap: 8px;
-                align-items: stretch;
-            }}
-            .user-badge {{
-                font-size: 12px;
-                color: var(--text-muted);
-                margin-bottom: 10px;
+                text-decoration: none;
             }}
             .or-line {{
                 text-align: center;
@@ -705,20 +761,18 @@ def home_page(request: Request, error: str = None):
                 <a href="/cabinet" class="avatar-btn" title="Кабинет">👤</a>
             </header>
 
-            <a id="ad-banner" href="#" target="_blank" class="banner-card">
-                <img id="ad-image" class="banner-img" src="" alt="Banner">
-                <div id="ad-body" class="banner-overlay">
-                    <div id="ad-title" class="banner-title">GHOSTCORE</div>
-                    <div id="ad-text" class="banner-sub"></div>
-                </div>
-            </a>
+            <div class="top-zone">
+                <a id="ad-banner" href="#" target="_blank" class="banner-card">
+                    <img id="ad-image" class="banner-img" src="" alt="Banner">
+                    <div id="ad-body" class="banner-overlay">
+                        <div id="ad-title" class="banner-title">GHOSTCORE</div>
+                        <div id="ad-text" class="banner-sub"></div>
+                    </div>
+                </a>
+                {banner_creator_html}
+            </div>
 
             {chat_section_html}
-
-            <section id="access-panel" class="frame-card">
-                <div class="frame-title">SECURE ACCESS</div>
-                {access_block_html}
-            </section>
         </div>
 
         <script>
