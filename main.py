@@ -24,7 +24,6 @@ from database import (
 )
 import admin
 
-# Импортируем наши боевые модули GHOSTCORE
 import spammer
 import inviter
 import parser
@@ -40,11 +39,9 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 init_db()
 app.include_router(admin.router)
 
-# Временное хранилище активных процессов QR-авторизации в памяти сервера
 qr_sessions = {}
 
 
-# Менеджер WebSocket-подключений для общего чата
 class ChatConnectionManager:
     def __init__(self):
         self.active_connections: List[WebSocket] = []
@@ -71,28 +68,39 @@ class ChatConnectionManager:
 chat_manager = ChatConnectionManager()
 
 
+def get_authorized_client(client_key: str):
+    if not client_key:
+        return None
+    db = get_db()
+    row = db.execute(
+        "SELECT id, key_code, client_name, status FROM access_keys WHERE key_code = ?",
+        (client_key.strip().upper(),),
+    ).fetchone()
+    db.close()
+    return dict(row) if row else None
+
+
 @app.get("/api/home-data")
-def api_home_data():
+def api_home_data(request: Request):
+    client_key = request.cookies.get("client_session")
+    user = get_authorized_client(client_key)
+    messages = get_recent_chat_messages(limit=50) if user else []
     return JSONResponse({
         "banner": get_banner(),
-        "messages": get_recent_chat_messages(limit=50),
+        "messages": messages,
+        "authenticated": bool(user),
     })
 
 
 @app.websocket("/ws/chat")
 async def websocket_chat(websocket: WebSocket):
     client_key = websocket.cookies.get("client_session")
-    author = "Гость"
+    user = get_authorized_client(client_key)
+    if not user:
+        await websocket.close(code=1008)
+        return
 
-    if client_key:
-        db = get_db()
-        row = db.execute(
-            "SELECT client_name, key_code FROM access_keys WHERE key_code = ?",
-            (client_key,),
-        ).fetchone()
-        db.close()
-        if row:
-            author = row["client_name"] if row["client_name"] else row["key_code"]
+    author = user["client_name"] if user.get("client_name") else user["key_code"]
 
     await chat_manager.connect(websocket)
     try:
@@ -190,11 +198,10 @@ async def admin_delete_chat_message(msg_id: int = Form(...)):
 
 @app.get("/", response_class=HTMLResponse)
 def home_page(request: Request, error: str = None):
-    err_html = (
-        f'<div class="err-box">{error}</div>'
-        if error else ""
-    )
-    has_session = bool(request.cookies.get("client_session"))
+    err_html = f'<div class="err-box">{error}</div>' if error else ""
+    client_key = request.cookies.get("client_session")
+    user = get_authorized_client(client_key)
+    is_auth = bool(user)
 
     drawer_links = (
         """
@@ -204,32 +211,132 @@ def home_page(request: Request, error: str = None):
         <a href="/cabinet#parser" class="drawer-link">Парсер</a>
         <a href="/logout-client" class="drawer-link drawer-dim">Выйти из аккаунта</a>
         """
-        if has_session else
+        if is_auth else
         """
-        <a href="#access-panel" class="drawer-link drawer-hot" onclick="closeDrawer()">Вход по ключу / Регистрация</a>
-        <a href="/cabinet" class="drawer-link">Личный кабинет</a>
+        <a href="#access-panel" class="drawer-link drawer-hot" onclick="closeDrawer()">Вход / Регистрация</a>
         """
     )
 
-    access_block_html = (
+    chat_section_html = (
         """
+        <section class="frame-card">
+            <div class="frame-title">ACTIVE TRANSMISSIONS</div>
+            <div id="chat-box" class="tx-list"></div>
+            <form id="chat-form" class="tx-form">
+                <input id="chat-input" type="text" class="field-box" placeholder="Type your message..." autocomplete="off" required>
+                <button type="submit" class="btn-send" aria-label="Отправить">➤</button>
+            </form>
+        </section>
+        """
+        if is_auth else ""
+    )
+
+    access_block_html = (
+        f"""
+        <div class="user-badge">АККАУНТ: <b>{user.get("client_name") or user["key_code"]}</b></div>
         <div class="btn-pair">
             <a href="/cabinet" class="btn-submit" style="text-decoration:none;flex:1 1 auto;">OPEN CABINET</a>
             <a href="/logout-client" class="btn-ghost" style="text-decoration:none;flex:0 0 auto;">EXIT</a>
         </div>
         """
-        if has_session else
+        if is_auth else
         f"""
         {err_html}
         <form action="/login" method="POST" style="margin-bottom: 10px;">
             <input type="text" name="key_code" class="field-box" placeholder="KEY CODE" required style="text-transform: uppercase;">
             <button type="submit" class="btn-submit" style="width: 100%; margin-top: 8px;">SUBMIT ACCESS</button>
         </form>
-        <div class="or-line">OR GET NEW KEY</div>
+        <div class="or-line">OR REGISTER NEW KEY</div>
         <form action="/register" method="POST">
             <input type="text" name="client_name" class="field-box" placeholder="YOUR NAME" required>
-            <button type="submit" class="btn-ghost" style="width: 100%; margin-top: 8px;">CREATE KEY & ENTER</button>
+            <button type="submit" class="btn-ghost" style="width: 100%; margin-top: 8px;">REGISTER & GET KEY</button>
         </form>
+        """
+    )
+
+    chat_script = (
+        """
+        const chatBox = document.getElementById("chat-box");
+        const chatForm = document.getElementById("chat-form");
+        const chatInput = document.getElementById("chat-input");
+
+        function appendMessage(id, author, text) {
+            if (!chatBox) return;
+            const item = document.createElement("div");
+            item.className = "tx-item";
+            if (id !== undefined && id !== null) item.dataset.msgId = String(id);
+
+            const nick = document.createElement("span");
+            nick.className = "tx-nick";
+            nick.textContent = (author || "Anon") + ":";
+
+            const msgText = document.createElement("span");
+            msgText.textContent = " " + text;
+
+            item.appendChild(nick);
+            item.appendChild(msgText);
+            chatBox.appendChild(item);
+            chatBox.scrollTop = chatBox.scrollHeight;
+        }
+
+        async function loadChatHistory() {
+            try {
+                const res = await fetch("/api/home-data");
+                if (!res.ok) return;
+                const data = await res.json();
+                if (data.banner) applyBanner(data.banner);
+                if (data.authenticated && chatBox && Array.isArray(data.messages)) {
+                    chatBox.innerHTML = "";
+                    data.messages.forEach(m => appendMessage(m.id, m.author, m.text));
+                }
+            } catch (e) {
+                console.error(e);
+            }
+        }
+
+        const wsProtocol = location.protocol === "https:" ? "wss:" : "ws:";
+        const ws = new WebSocket(`${wsProtocol}//${location.host}/ws/chat`);
+
+        ws.onmessage = (event) => {
+            try {
+                const payload = JSON.parse(event.data);
+                if (payload.type === "clear") { if (chatBox) chatBox.innerHTML = ""; return; }
+                if (payload.type === "delete") {
+                    const target = chatBox ? chatBox.querySelector(`[data-msg-id="${payload.id}"]`) : null;
+                    if (target) target.remove();
+                    return;
+                }
+                appendMessage(payload.id, payload.author, payload.text);
+            } catch (e) {
+                appendMessage(null, "System", event.data);
+            }
+        };
+
+        if (chatForm) {
+            chatForm.addEventListener("submit", (e) => {
+                e.preventDefault();
+                const text = chatInput.value.trim();
+                if (!text || ws.readyState !== WebSocket.OPEN) return;
+                ws.send(JSON.stringify({ text }));
+                chatInput.value = "";
+            });
+        }
+
+        loadChatHistory();
+        """
+        if is_auth else
+        """
+        async function loadBannerOnly() {
+            try {
+                const res = await fetch("/api/home-data");
+                if (!res.ok) return;
+                const data = await res.json();
+                if (data.banner) applyBanner(data.banner);
+            } catch (e) {
+                console.error(e);
+            }
+        }
+        loadBannerOnly();
         """
     )
 
@@ -264,8 +371,6 @@ def home_page(request: Request, error: str = None):
                 max-width: 420px;
                 margin: 0 auto;
             }}
-
-            /* Верхняя панель как на макете */
             .nav-bar {{
                 display: flex;
                 align-items: center;
@@ -315,8 +420,6 @@ def home_page(request: Request, error: str = None):
                 font-size: 16px;
                 font-weight: 700;
             }}
-
-            /* Боковое меню слева */
             .drawer-mask {{
                 position: fixed;
                 inset: 0;
@@ -382,8 +485,6 @@ def home_page(request: Request, error: str = None):
                 background: rgba(255, 30, 66, 0.14);
             }}
             .drawer-dim {{ color: var(--text-muted); }}
-
-            /* Баннерная карточка с неоновой красной рамкой */
             .banner-card {{
                 display: none;
                 position: relative;
@@ -412,15 +513,12 @@ def home_page(request: Request, error: str = None):
                 letter-spacing: 0.8px;
                 text-transform: uppercase;
                 color: var(--text-main);
-                text-shadow: 0 2px 10px rgba(0, 0, 0, 0.9);
             }}
             .banner-sub {{
                 font-size: 12px;
                 color: #e5d4d8;
                 margin-top: 3px;
             }}
-
-            /* Карточки секций */
             .frame-card {{
                 background: var(--panel-bg);
                 border: 1.5px solid var(--panel-border);
@@ -437,15 +535,18 @@ def home_page(request: Request, error: str = None):
                 color: var(--text-main);
                 margin-bottom: 10px;
             }}
-
-            /* Чат */
             .tx-list {{
-                max-height: 220px;
+                min-height: 140px;
+                max-height: 240px;
                 overflow-y: auto;
                 display: flex;
                 flex-direction: column;
                 gap: 7px;
                 margin-bottom: 10px;
+                padding: 6px;
+                background: #0a0608;
+                border: 1px solid #2c0e15;
+                border-radius: 8px;
             }}
             .tx-item {{
                 background: #1a0d12;
@@ -493,8 +594,6 @@ def home_page(request: Request, error: str = None):
                 cursor: pointer;
                 box-shadow: 0 0 10px var(--neon-red-soft);
             }}
-
-            /* Вход по ключу */
             .btn-submit {{
                 display: inline-flex;
                 align-items: center;
@@ -532,6 +631,11 @@ def home_page(request: Request, error: str = None):
                 display: flex;
                 gap: 8px;
                 align-items: stretch;
+            }}
+            .user-badge {{
+                font-size: 12px;
+                color: var(--text-muted);
+                margin-bottom: 10px;
             }}
             .or-line {{
                 text-align: center;
@@ -581,14 +685,7 @@ def home_page(request: Request, error: str = None):
                 </div>
             </a>
 
-            <section class="frame-card">
-                <div class="frame-title">ACTIVE TRANSMISSIONS</div>
-                <div id="chat-box" class="tx-list"></div>
-                <form id="chat-form" class="tx-form">
-                    <input id="chat-input" type="text" class="field-box" placeholder="Type your message..." autocomplete="off" required>
-                    <button type="submit" class="btn-send" aria-label="Отправить">➤</button>
-                </form>
-            </section>
+            {chat_section_html}
 
             <section id="access-panel" class="frame-card">
                 <div class="frame-title">SECURE ACCESS</div>
@@ -607,28 +704,6 @@ def home_page(request: Request, error: str = None):
             function closeDrawer() {{
                 drawer.classList.remove("open");
                 mask.classList.remove("open");
-            }}
-
-            const chatBox = document.getElementById("chat-box");
-            const chatForm = document.getElementById("chat-form");
-            const chatInput = document.getElementById("chat-input");
-
-            function appendMessage(id, author, text) {{
-                const item = document.createElement("div");
-                item.className = "tx-item";
-                if (id !== undefined && id !== null) item.dataset.msgId = String(id);
-
-                const nick = document.createElement("span");
-                nick.className = "tx-nick";
-                nick.textContent = (author || "Anon") + ":";
-
-                const msgText = document.createElement("span");
-                msgText.textContent = " " + text;
-
-                item.appendChild(nick);
-                item.appendChild(msgText);
-                chatBox.appendChild(item);
-                chatBox.scrollTop = chatBox.scrollHeight;
             }}
 
             function applyBanner(banner) {{
@@ -664,67 +739,140 @@ def home_page(request: Request, error: str = None):
                 bannerEl.style.display = "block";
             }}
 
-            async function loadHomeData() {{
-                try {{
-                    const res = await fetch("/api/home-data");
-                    if (!res.ok) return;
-                    const data = await res.json();
-                    applyBanner(data.banner);
-                    chatBox.innerHTML = "";
-                    if (Array.isArray(data.messages)) {{
-                        data.messages.forEach(m => appendMessage(m.id, m.author, m.text));
-                    }}
-                }} catch (e) {{
-                    console.error(e);
-                }}
-            }}
-
-            const wsProtocol = location.protocol === "https:" ? "wss:" : "ws:";
-            const ws = new WebSocket(`${{wsProtocol}}//${{location.host}}/ws/chat`);
-
-            ws.onmessage = (event) => {{
-                try {{
-                    const payload = JSON.parse(event.data);
-                    if (payload.type === "clear") {{ chatBox.innerHTML = ""; return; }}
-                    if (payload.type === "delete") {{
-                        const target = chatBox.querySelector(`[data-msg-id="${{payload.id}}"]`);
-                        if (target) target.remove();
-                        return;
-                    }}
-                    appendMessage(payload.id, payload.author, payload.text);
-                }} catch (e) {{
-                    appendMessage(null, "System", event.data);
-                }}
-            }};
-
-            chatForm.addEventListener("submit", (e) => {{
-                e.preventDefault();
-                const text = chatInput.value.trim();
-                if (!text || ws.readyState !== WebSocket.OPEN) return;
-                ws.send(JSON.stringify({{ text }}));
-                chatInput.value = "";
-            }});
-
-            loadHomeData();
+            {chat_script}
         </script>
     </body>
     </html>
     """
 
 
-@app.post("/register")
+@app.post("/register", response_class=HTMLResponse)
 def register_client(response: Response, client_name: str = Form(...)):
+    clean_name = client_name.strip()
+    new_key = str(uuid.uuid4())[:8].upper()
+
     db = get_db()
     cursor = db.cursor()
-    new_key = str(uuid.uuid4())[:8].upper()
     cursor.execute(
         "INSERT INTO access_keys (key_code, status, client_name) VALUES (?, 'active', ?)",
-        (new_key, client_name.strip()),
+        (new_key, clean_name),
     )
     db.commit()
     db.close()
 
-    resp = RedirectResponse(url="/cabinet", status_code=303)
+    html = f"""
+    <!DOCTYPE html>
+    <html lang="ru">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>GHOSTCORE | Ваш ключ доступа</title>
+        <style>
+            :root {{
+                --bg-main: #060609;
+                --panel-bg: #110b0e;
+                --panel-border: #4a121d;
+                --neon-red: #ff1e42;
+                --neon-red-soft: rgba(255, 30, 66, 0.28);
+                --text-main: #f5f5f7;
+                --text-muted: #9e969b;
+            }}
+            * {{ box-sizing: border-box; }}
+            body {{
+                margin: 0;
+                padding: 14px;
+                min-height: 100vh;
+                background: radial-gradient(circle at top, #18070c 0%, var(--bg-main) 65%);
+                color: var(--text-main);
+                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+            }}
+            .card {{
+                width: 100%;
+                max-width: 400px;
+                background: var(--panel-bg);
+                border: 1.5px solid var(--panel-border);
+                border-radius: 12px;
+                padding: 18px;
+                box-shadow: 0 0 20px var(--neon-red-soft);
+            }}
+            h2 {{
+                margin: 0 0 8px 0;
+                font-size: 16px;
+                text-transform: uppercase;
+                letter-spacing: 1px;
+                color: var(--neon-red);
+            }}
+            p {{
+                margin: 0 0 14px 0;
+                font-size: 12px;
+                color: var(--text-muted);
+                line-height: 1.4;
+            }}
+            .key-box {{
+                background: #090507;
+                border: 1.5px solid var(--neon-red);
+                border-radius: 8px;
+                padding: 12px;
+                text-align: center;
+                font-family: monospace;
+                font-size: 20px;
+                font-weight: 800;
+                letter-spacing: 2px;
+                color: #fff;
+                margin-bottom: 12px;
+                user-select: all;
+            }}
+            .btn {{
+                width: 100%;
+                padding: 11px 14px;
+                border-radius: 8px;
+                border: none;
+                font-size: 12px;
+                font-weight: 800;
+                text-transform: uppercase;
+                letter-spacing: 0.8px;
+                cursor: pointer;
+                text-decoration: none;
+                display: block;
+                text-align: center;
+                margin-top: 8px;
+            }}
+            .btn-red {{
+                background: linear-gradient(135deg, #c71230, var(--neon-red));
+                color: #fff;
+                box-shadow: 0 0 12px var(--neon-red-soft);
+            }}
+            .btn-dark {{
+                background: #180c11;
+                border: 1px solid var(--panel-border);
+                color: var(--text-main);
+            }}
+        </style>
+    </head>
+    <body>
+        <div class="card">
+            <h2>Ключ создан</h2>
+            <p>Аккаунт <b>{clean_name}</b> зарегистрирован. Сохраните ваш ключ — он понадобится для повторного входа:</p>
+            <div id="reg-key" class="key-box">{new_key}</div>
+            <button type="button" class="btn btn-dark" onclick="copyKey()">Скопировать ключ</button>
+            <a href="/cabinet" class="btn btn-red">Перейти в кабинет</a>
+            <a href="/" class="btn btn-dark">На главную (чат)</a>
+        </div>
+        <script>
+            function copyKey() {{
+                const keyText = document.getElementById("reg-key").textContent.trim();
+                if (navigator.clipboard) {{
+                    navigator.clipboard.writeText(keyText).catch(() => {{}});
+                }}
+            }}
+        </script>
+    </body>
+    </html>
+    """
+    resp = HTMLResponse(content=html)
     resp.set_cookie(key="client_session", value=new_key, httponly=True)
     return resp
 
