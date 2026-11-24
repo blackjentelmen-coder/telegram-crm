@@ -67,6 +67,8 @@ def init_banners_table():
         db.execute("ALTER TABLE access_keys ADD COLUMN is_muted INTEGER NOT NULL DEFAULT 0")
     if "admin_note" not in cols:
         db.execute("ALTER TABLE access_keys ADD COLUMN admin_note TEXT NOT NULL DEFAULT ''")
+    if "is_paid" not in cols:
+        db.execute("ALTER TABLE access_keys ADD COLUMN is_paid INTEGER NOT NULL DEFAULT 0")
     db.commit()
     db.close()
 
@@ -94,21 +96,7 @@ def get_active_home_banners() -> List[dict]:
         item["duration_sec"] = max(2, min(dur, 3600))
         if item.get("text") or item.get("image_url") or item.get("title"):
             result.append(item)
-    if result:
-        return result
-
-    legacy = get_banner()
-    if legacy and legacy.get("active") and (legacy.get("text") or legacy.get("image_url")):
-        return [{
-            "id": 0,
-            "title": legacy.get("title") or "GHOSTCORE",
-            "text": legacy.get("text") or "",
-            "url": legacy.get("url") or "",
-            "image_url": legacy.get("image_url") or "",
-            "duration_sec": 8,
-            "is_active": 1,
-        }]
-    return []
+    return result
 
 
 def get_all_home_banners() -> List[dict]:
@@ -171,7 +159,7 @@ def get_authorized_client(client_key: str):
     db = get_db()
     try:
         row = db.execute(
-            "SELECT id, key_code, client_name, status_text, status, is_muted FROM access_keys WHERE key_code = ?",
+            "SELECT id, key_code, client_name, status_text, status, is_muted, is_paid FROM access_keys WHERE key_code = ?",
             (client_key.strip().upper(),),
         ).fetchone()
     except sqlite3.OperationalError:
@@ -186,6 +174,7 @@ def get_authorized_client(client_key: str):
     if (data.get("status") or "").lower() == "banned":
         return None
     data["is_muted"] = int(data.get("is_muted") or 0)
+    data["is_paid"] = int(data.get("is_paid") or 0)
     return data
 
 
@@ -219,6 +208,7 @@ def api_home_data(request: Request):
         "messages": messages,
         "authenticated": bool(user),
         "is_muted": bool(user and user.get("is_muted")),
+        "is_paid": bool(user and user.get("is_paid")),
     })
 
 
@@ -349,11 +339,13 @@ def admin_clear_legacy_banner(request: Request):
 @app.get("/api/profile")
 def api_get_profile(request: Request):
     client_key = request.cookies.get("client_session")
-    if not get_authorized_client(client_key):
+    user = get_authorized_client(client_key)
+    if not user:
         return JSONResponse({"authenticated": False}, status_code=401)
     profile = get_client_profile(client_key)
     if not profile:
         return JSONResponse({"authenticated": False}, status_code=401)
+    profile["is_paid"] = bool(user.get("is_paid"))
     return JSONResponse({"authenticated": True, "profile": profile})
 
 
@@ -367,9 +359,20 @@ async def update_profile_route(request: Request):
         return RedirectResponse(url="/", status_code=303)
 
     form = await request.form()
-    new_name = str(form.get("client_name", ""))
+    new_name = str(form.get("client_name", "")).strip()
     new_status = str(form.get("status_text", ""))
-    update_client_profile(client_key, new_name, new_status)
+
+    if new_name:
+        db = get_db()
+        dup = db.execute(
+            "SELECT id FROM access_keys WHERE LOWER(TRIM(client_name)) = LOWER(?) AND key_code != ?",
+            (new_name, client_key.strip().upper()),
+        ).fetchone()
+        db.close()
+        if dup:
+            return RedirectResponse(url="/cabinet?message=Это+имя+уже+занято#profile", status_code=303)
+
+    update_client_profile(client_key, new_name or profile.get("client_name", ""), new_status)
     return RedirectResponse(url="/cabinet?message=Профиль+сохранён#profile", status_code=303)
 
 
@@ -612,7 +615,7 @@ def home_page(request: Request, error: str = None):
                 const res = await fetch("/api/home-data");
                 if (!res.ok) return;
                 const data = await res.json();
-                startBannerRotation(Array.isArray(data.banners) ? data.banners : (data.banner ? [data.banner] : []));
+                startBannerRotation(Array.isArray(data.banners) ? data.banners : []);
                 if (data.is_muted) {
                     showChatNotice("Вы замучены в чате администратором.");
                 } else {
@@ -668,7 +671,7 @@ def home_page(request: Request, error: str = None):
                 const res = await fetch("/api/home-data");
                 if (!res.ok) return;
                 const data = await res.json();
-                startBannerRotation(Array.isArray(data.banners) ? data.banners : (data.banner ? [data.banner] : []));
+                startBannerRotation(Array.isArray(data.banners) ? data.banners : []);
             } catch (e) {
                 console.error(e);
             }
@@ -1184,12 +1187,23 @@ def home_page(request: Request, error: str = None):
 @app.post("/register", response_class=HTMLResponse)
 def register_client(response: Response, client_name: str = Form(...)):
     clean_name = client_name.strip()
-    new_key = str(uuid.uuid4())[:8].upper()
+    if not clean_name:
+        return RedirectResponse(url="/?error=Введите имя", status_code=303)
 
+    init_banners_table()
     db = get_db()
     cursor = db.cursor()
+    existing = cursor.execute(
+        "SELECT id FROM access_keys WHERE LOWER(TRIM(client_name)) = LOWER(?)",
+        (clean_name,),
+    ).fetchone()
+    if existing:
+        db.close()
+        return RedirectResponse(url="/?error=Пользователь с таким именем уже существует", status_code=303)
+
+    new_key = str(uuid.uuid4())[:8].upper()
     cursor.execute(
-        "INSERT INTO access_keys (key_code, status, client_name) VALUES (?, 'active', ?)",
+        "INSERT INTO access_keys (key_code, status, client_name, is_paid) VALUES (?, 'active', ?, 0)",
         (new_key, clean_name),
     )
     db.commit()
@@ -1603,8 +1617,12 @@ def delete_client_account(request: Request, acc_id: int = Form(...)):
 @app.post("/cabinet/run-task")
 async def run_client_task(request: Request):
     client_key = request.cookies.get("client_session")
-    if not get_authorized_client(client_key):
+    user = get_authorized_client(client_key)
+    if not user:
         return RedirectResponse(url="/", status_code=303)
+
+    if int(user.get("is_paid") or 0) != 1:
+        return RedirectResponse(url="/cabinet?message=Для запуска задач нужен оплаченный тариф (VIP)", status_code=303)
 
     form = await request.form()
     task_type = form.get("task_type")
