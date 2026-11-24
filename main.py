@@ -1,4 +1,3 @@
-cat << 'EOF' > main.py
 import os
 import shutil
 import asyncio
@@ -1367,4 +1366,3 @@ def logout_client():
     resp = RedirectResponse(url="/", status_code=303)
     resp.delete_cookie(key="client_session")
     return resp
-EOF
