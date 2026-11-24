@@ -5,6 +5,7 @@ import qrcode
 import io
 import base64
 import uuid
+import time
 from typing import List
 from fastapi import FastAPI, Form, Request, Response, UploadFile, File, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse, RedirectResponse, FileResponse, JSONResponse
@@ -42,6 +43,92 @@ init_db()
 app.include_router(admin.router)
 
 qr_sessions = {}
+
+
+def init_banners_table():
+    db = get_db()
+    db.execute(
+        """
+        CREATE TABLE IF NOT EXISTS home_banners (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            title TEXT NOT NULL DEFAULT 'GHOSTCORE',
+            text TEXT NOT NULL DEFAULT '',
+            url TEXT NOT NULL DEFAULT '',
+            image_url TEXT NOT NULL DEFAULT '',
+            duration_sec INTEGER NOT NULL DEFAULT 8,
+            is_active INTEGER NOT NULL DEFAULT 1,
+            created_at REAL NOT NULL DEFAULT 0
+        )
+        """
+    )
+    db.commit()
+    db.close()
+
+
+init_banners_table()
+
+
+def get_active_home_banners() -> List[dict]:
+    init_banners_table()
+    db = get_db()
+    rows = db.execute(
+        """
+        SELECT id, title, text, url, image_url, duration_sec, is_active, created_at
+        FROM home_banners
+        WHERE is_active = 1
+        ORDER BY id ASC
+        """
+    ).fetchall()
+    db.close()
+    result = []
+    for r in rows:
+        item = dict(r)
+        dur = int(item.get("duration_sec") or 8)
+        item["duration_sec"] = max(2, min(dur, 3600))
+        if item.get("text") or item.get("image_url") or item.get("title"):
+            result.append(item)
+    if result:
+        return result
+
+    legacy = get_banner()
+    if legacy and legacy.get("active") and (legacy.get("text") or legacy.get("image_url")):
+        return [{
+            "id": 0,
+            "title": legacy.get("title") or "GHOSTCORE",
+            "text": legacy.get("text") or "",
+            "url": legacy.get("url") or "",
+            "image_url": legacy.get("image_url") or "",
+            "duration_sec": 8,
+            "is_active": 1,
+        }]
+    return []
+
+
+def get_all_home_banners() -> List[dict]:
+    init_banners_table()
+    db = get_db()
+    rows = db.execute(
+        """
+        SELECT id, title, text, url, image_url, duration_sec, is_active, created_at
+        FROM home_banners
+        ORDER BY id DESC
+        """
+    ).fetchall()
+    db.close()
+    return [dict(r) for r in rows]
+
+
+def save_uploaded_banner_image(image: UploadFile) -> str:
+    if not image or not image.filename:
+        return ""
+    ext = os.path.splitext(image.filename)[1].lower()
+    if ext not in [".jpg", ".jpeg", ".png", ".gif", ".webp"]:
+        return ""
+    filename = f"{uuid.uuid4().hex}{ext}"
+    filepath = os.path.join("static", "banners", filename)
+    with open(filepath, "wb") as buffer:
+        shutil.copyfileobj(image.file, buffer)
+    return f"/static/banners/{filename}"
 
 
 class ChatConnectionManager:
@@ -104,33 +191,98 @@ def api_home_data(request: Request):
     client_key = request.cookies.get("client_session")
     user = get_authorized_client(client_key)
     messages = get_recent_chat_messages(limit=50) if user else []
+    banners = get_active_home_banners()
+    first_banner = banners[0] if banners else None
     return JSONResponse({
-        "banner": get_banner(),
+        "banner": first_banner,
+        "banners": banners,
         "messages": messages,
         "authenticated": bool(user),
     })
 
 
-@app.post("/home/banner/quick-add")
-async def home_quick_add_banner(request: Request):
+@app.get("/api/admin/banners")
+def api_admin_banners(request: Request):
+    if not is_admin_authenticated(request):
+        return JSONResponse({"error": "Admin access required"}, status_code=403)
+    return JSONResponse({"banners": get_all_home_banners()})
+
+
+@app.post("/admin/banners/add")
+async def admin_add_banner(
+    request: Request,
+    title: str = Form("GHOSTCORE"),
+    text: str = Form(""),
+    url: str = Form(""),
+    duration_sec: int = Form(8),
+    active: str = Form("on"),
+    image: UploadFile = File(None),
+):
     if not is_admin_authenticated(request):
         return JSONResponse({"error": "Admin access required"}, status_code=403)
 
-    form = await request.form()
-    title = str(form.get("title", "BANNER")).strip() or "BANNER"
-    text = str(form.get("text", "")).strip()
-    url = str(form.get("url", "")).strip()
-    current = get_banner()
-    image_url = current.get("image_url", "")
+    image_url = save_uploaded_banner_image(image)
+    clean_duration = max(2, min(int(duration_sec or 8), 3600))
+    is_active = 1 if active in ("on", "1", "true", "yes") else 0
 
-    update_banner_db(
-        is_active=True,
-        title=title,
-        text=text,
-        url=url,
-        image_url=image_url,
+    init_banners_table()
+    db = get_db()
+    db.execute(
+        """
+        INSERT INTO home_banners (title, text, url, image_url, duration_sec, is_active, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            title.strip() or "GHOSTCORE",
+            text.strip(),
+            url.strip(),
+            image_url,
+            clean_duration,
+            is_active,
+            time.time(),
+        ),
     )
-    return RedirectResponse(url="/", status_code=303)
+    db.commit()
+    db.close()
+
+    return RedirectResponse(url="/admin?message=Баннер+добавлен", status_code=303)
+
+
+@app.post("/admin/banners/toggle")
+async def admin_toggle_banner(request: Request, banner_id: int = Form(...)):
+    if not is_admin_authenticated(request):
+        return JSONResponse({"error": "Admin access required"}, status_code=403)
+
+    init_banners_table()
+    db = get_db()
+    row = db.execute("SELECT is_active FROM home_banners WHERE id = ?", (banner_id,)).fetchone()
+    if row:
+        next_val = 0 if int(row["is_active"]) == 1 else 1
+        db.execute("UPDATE home_banners SET is_active = ? WHERE id = ?", (next_val, banner_id))
+        db.commit()
+    db.close()
+    return RedirectResponse(url="/admin?message=Статус+баннера+обновлён", status_code=303)
+
+
+@app.post("/admin/banners/delete")
+async def admin_delete_banner(request: Request, banner_id: int = Form(...)):
+    if not is_admin_authenticated(request):
+        return JSONResponse({"error": "Admin access required"}, status_code=403)
+
+    init_banners_table()
+    db = get_db()
+    row = db.execute("SELECT image_url FROM home_banners WHERE id = ?", (banner_id,)).fetchone()
+    if row and row["image_url"] and row["image_url"].startswith("/static/banners/"):
+        old_path = os.path.join("static", "banners", os.path.basename(row["image_url"]))
+        if os.path.exists(old_path):
+            try:
+                os.remove(old_path)
+            except Exception:
+                pass
+    db.execute("DELETE FROM home_banners WHERE id = ?", (banner_id,))
+    db.commit()
+    db.close()
+    return RedirectResponse(url="/admin?message=Баннер+удалён", status_code=303)
 
 
 @app.get("/api/profile")
@@ -189,31 +341,30 @@ async def websocket_chat(websocket: WebSocket):
 
 @app.post("/admin/banner/update")
 async def admin_update_banner(
+    request: Request,
     title: str = Form("Промо"),
     text: str = Form(""),
     url: str = Form(""),
+    duration_sec: int = Form(8),
     active: str = Form("off"),
     image: UploadFile = File(None),
 ):
+    if not is_admin_authenticated(request):
+        return JSONResponse({"error": "Admin access required"}, status_code=403)
+
     is_active = (active == "on")
-    new_image_url = None
-    if image and image.filename:
-        ext = os.path.splitext(image.filename)[1].lower()
-        if ext in [".jpg", ".jpeg", ".png", ".gif", ".webp"]:
-            current_banner = get_banner()
-            old_img = current_banner.get("image_url", "")
-            if old_img.startswith("/static/banners/"):
-                old_path = os.path.join("static", "banners", os.path.basename(old_img))
-                if os.path.exists(old_path):
-                    try:
-                        os.remove(old_path)
-                    except Exception:
-                        pass
-            filename = f"{uuid.uuid4().hex}{ext}"
-            filepath = os.path.join("static", "banners", filename)
-            with open(filepath, "wb") as buffer:
-                shutil.copyfileobj(image.file, buffer)
-            new_image_url = f"/static/banners/{filename}"
+    new_image_url = save_uploaded_banner_image(image) if (image and image.filename) else None
+
+    if new_image_url:
+        current_banner = get_banner()
+        old_img = current_banner.get("image_url", "")
+        if old_img.startswith("/static/banners/"):
+            old_path = os.path.join("static", "banners", os.path.basename(old_img))
+            if os.path.exists(old_path):
+                try:
+                    os.remove(old_path)
+                except Exception:
+                    pass
 
     update_banner_db(
         is_active=is_active,
@@ -222,11 +373,36 @@ async def admin_update_banner(
         url=url.strip(),
         image_url=new_image_url,
     )
+
+    if is_active and (text.strip() or new_image_url):
+        clean_duration = max(2, min(int(duration_sec or 8), 3600))
+        init_banners_table()
+        db = get_db()
+        db.execute(
+            """
+            INSERT INTO home_banners (title, text, url, image_url, duration_sec, is_active, created_at)
+            VALUES (?, ?, ?, ?, ?, 1, ?)
+            """,
+            (
+                title.strip() or "Промо",
+                text.strip(),
+                url.strip(),
+                new_image_url or "",
+                clean_duration,
+                time.time(),
+            ),
+        )
+        db.commit()
+        db.close()
+
     return RedirectResponse(url="/admin?message=Баннер+обновлён", status_code=303)
 
 
 @app.post("/admin/banner/clear-image")
-def admin_clear_banner_image():
+def admin_clear_banner_image(request: Request):
+    if not is_admin_authenticated(request):
+        return JSONResponse({"error": "Admin access required"}, status_code=403)
+
     current_banner = get_banner()
     old_img = current_banner.get("image_url", "")
     if old_img.startswith("/static/banners/"):
@@ -247,14 +423,20 @@ def admin_clear_banner_image():
 
 
 @app.post("/admin/chat/clear")
-async def admin_clear_chat():
+async def admin_clear_chat(request: Request):
+    if not is_admin_authenticated(request):
+        return JSONResponse({"error": "Admin access required"}, status_code=403)
+
     clear_chat_messages_db()
     await chat_manager.broadcast({"type": "clear"})
     return RedirectResponse(url="/admin?message=Чат+очищен", status_code=303)
 
 
 @app.post("/admin/chat/delete")
-async def admin_delete_chat_message(msg_id: int = Form(...)):
+async def admin_delete_chat_message(request: Request, msg_id: int = Form(...)):
+    if not is_admin_authenticated(request):
+        return JSONResponse({"error": "Admin access required"}, status_code=403)
+
     delete_chat_message_db(msg_id)
     await chat_manager.broadcast({"type": "delete", "id": msg_id})
     return RedirectResponse(url="/admin?message=Сообщение+удалено", status_code=303)
@@ -335,12 +517,12 @@ def home_page(request: Request, error: str = None):
             chatBox.scrollTop = chatBox.scrollHeight;
         }
 
-        async function loadChatHistory() {
+        async function loadHomeData() {
             try {
                 const res = await fetch("/api/home-data");
                 if (!res.ok) return;
                 const data = await res.json();
-                if (data.banner) applyBanner(data.banner);
+                startBannerRotation(Array.isArray(data.banners) ? data.banners : (data.banner ? [data.banner] : []));
                 if (data.authenticated && chatBox && Array.isArray(data.messages)) {
                     chatBox.innerHTML = "";
                     data.messages.forEach(m => appendMessage(m.id, m.author, m.text));
@@ -378,7 +560,7 @@ def home_page(request: Request, error: str = None):
             });
         }
 
-        loadChatHistory();
+        loadHomeData();
         """
         if is_auth else
         """
@@ -387,7 +569,7 @@ def home_page(request: Request, error: str = None):
                 const res = await fetch("/api/home-data");
                 if (!res.ok) return;
                 const data = await res.json();
-                if (data.banner) applyBanner(data.banner);
+                startBannerRotation(Array.isArray(data.banners) ? data.banners : (data.banner ? [data.banner] : []));
             } catch (e) {
                 console.error(e);
             }
@@ -555,6 +737,13 @@ def home_page(request: Request, error: str = None):
                 text-decoration: none;
                 color: var(--text-main);
                 margin-bottom: 8px;
+                opacity: 1;
+                transform: translateY(0) scale(1);
+                transition: opacity 0.35s ease, transform 0.35s ease;
+            }}
+            .banner-card.banner-fade-out {{
+                opacity: 0;
+                transform: translateY(-6px) scale(0.985);
             }}
             .banner-img {{
                 width: 100%;
@@ -566,6 +755,12 @@ def home_page(request: Request, error: str = None):
                 padding: 11px 13px;
                 background: linear-gradient(90deg, rgba(12, 5, 8, 0.92) 0%, rgba(12, 5, 8, 0.55) 100%);
             }}
+            .banner-top-row {{
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                gap: 8px;
+            }}
             .banner-title {{
                 font-size: 13px;
                 font-weight: 800;
@@ -573,10 +768,34 @@ def home_page(request: Request, error: str = None):
                 text-transform: uppercase;
                 color: var(--text-main);
             }}
+            .banner-timer-pill {{
+                font-size: 10px;
+                font-weight: 700;
+                letter-spacing: 0.6px;
+                color: var(--neon-red);
+                background: rgba(255, 30, 66, 0.14);
+                border: 1px solid rgba(255, 30, 66, 0.45);
+                border-radius: 999px;
+                padding: 2px 7px;
+                white-space: nowrap;
+            }}
             .banner-sub {{
                 font-size: 12px;
                 color: #e5d4d8;
                 margin-top: 3px;
+            }}
+            .banner-progress-track {{
+                width: 100%;
+                height: 2px;
+                background: rgba(255, 30, 66, 0.16);
+                overflow: hidden;
+            }}
+            .banner-progress-bar {{
+                height: 100%;
+                width: 100%;
+                background: linear-gradient(90deg, #c71230, var(--neon-red));
+                transform-origin: left center;
+                transition: none;
             }}
             .frame-card {{
                 background: var(--panel-bg);
@@ -732,8 +951,14 @@ def home_page(request: Request, error: str = None):
                 <a id="ad-banner" href="#" target="_blank" class="banner-card">
                     <img id="ad-image" class="banner-img" src="" alt="Banner">
                     <div id="ad-body" class="banner-overlay">
-                        <div id="ad-title" class="banner-title">GHOSTCORE</div>
+                        <div class="banner-top-row">
+                            <div id="ad-title" class="banner-title">GHOSTCORE</div>
+                            <span id="ad-counter" class="banner-timer-pill" style="display:none;"></span>
+                        </div>
                         <div id="ad-text" class="banner-sub"></div>
+                    </div>
+                    <div id="ad-progress-track" class="banner-progress-track" style="display:none;">
+                        <div id="ad-progress-bar" class="banner-progress-bar"></div>
                     </div>
                 </a>
             </div>
@@ -754,14 +979,21 @@ def home_page(request: Request, error: str = None):
                 mask.classList.remove("open");
             }}
 
-            function applyBanner(banner) {{
+            let bannerTimerId = null;
+            let bannerQueue = [];
+            let bannerIndex = 0;
+
+            function renderBannerItem(banner, index, total) {{
                 const bannerEl = document.getElementById("ad-banner");
                 const imgEl = document.getElementById("ad-image");
                 const bodyEl = document.getElementById("ad-body");
                 const titleEl = document.getElementById("ad-title");
                 const textEl = document.getElementById("ad-text");
+                const counterEl = document.getElementById("ad-counter");
+                const trackEl = document.getElementById("ad-progress-track");
+                const barEl = document.getElementById("ad-progress-bar");
 
-                if (!banner || !banner.active || (!banner.text && !banner.image_url)) {{
+                if (!banner || (!banner.text && !banner.image_url && !banner.title)) {{
                     bannerEl.style.display = "none";
                     return;
                 }}
@@ -777,14 +1009,61 @@ def home_page(request: Request, error: str = None):
                     imgEl.src = "";
                 }}
 
-                if (banner.text || banner.title) {{
-                    titleEl.textContent = banner.title || "GHOSTCORE";
-                    textEl.textContent = banner.text || "";
-                    bodyEl.style.display = "block";
+                titleEl.textContent = banner.title || "GHOSTCORE";
+                textEl.textContent = banner.text || "";
+                bodyEl.style.display = "block";
+
+                if (total > 1) {{
+                    const sec = Math.max(2, Number(banner.duration_sec || 8));
+                    counterEl.textContent = `${{index + 1}}/${{total}} • ${{sec}}s`;
+                    counterEl.style.display = "inline-block";
+                    trackEl.style.display = "block";
+
+                    barEl.style.transition = "none";
+                    barEl.style.transform = "scaleX(1)";
+                    void barEl.offsetWidth;
+                    barEl.style.transition = `transform ${{sec}}s linear`;
+                    barEl.style.transform = "scaleX(0)";
                 }} else {{
-                    bodyEl.style.display = "none";
+                    counterEl.style.display = "none";
+                    trackEl.style.display = "none";
                 }}
+
                 bannerEl.style.display = "block";
+                bannerEl.classList.remove("banner-fade-out");
+            }}
+
+            function startBannerRotation(banners) {{
+                if (bannerTimerId) {{
+                    clearTimeout(bannerTimerId);
+                    bannerTimerId = null;
+                }}
+                bannerQueue = Array.isArray(banners) ? banners : [];
+                bannerIndex = 0;
+
+                const bannerEl = document.getElementById("ad-banner");
+                if (!bannerQueue.length) {{
+                    bannerEl.style.display = "none";
+                    return;
+                }}
+
+                const step = () => {{
+                    const current = bannerQueue[bannerIndex % bannerQueue.length];
+                    renderBannerItem(current, bannerIndex % bannerQueue.length, bannerQueue.length);
+
+                    if (bannerQueue.length > 1) {{
+                        const sec = Math.max(2, Number(current.duration_sec || 8));
+                        bannerTimerId = setTimeout(() => {{
+                            bannerEl.classList.add("banner-fade-out");
+                            setTimeout(() => {{
+                                bannerIndex = (bannerIndex + 1) % bannerQueue.length;
+                                step();
+                            }}, 340);
+                        }}, sec * 1000);
+                    }}
+                }};
+
+                step();
             }}
 
             {chat_script}
