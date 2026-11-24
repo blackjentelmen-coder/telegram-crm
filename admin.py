@@ -1,9 +1,6 @@
 import os
-import shutil
-import uuid
-import time
 import sqlite3
-from fastapi import APIRouter, Form, Request, UploadFile, File
+from fastapi import APIRouter, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from database import (
     get_db,
@@ -43,6 +40,8 @@ def ensure_admin_schema():
         db.execute("ALTER TABLE access_keys ADD COLUMN is_muted INTEGER NOT NULL DEFAULT 0")
     if "admin_note" not in cols:
         db.execute("ALTER TABLE access_keys ADD COLUMN admin_note TEXT NOT NULL DEFAULT ''")
+    if "is_paid" not in cols:
+        db.execute("ALTER TABLE access_keys ADD COLUMN is_paid INTEGER NOT NULL DEFAULT 0")
     db.commit()
     db.close()
 
@@ -64,19 +63,35 @@ def fetch_banners_list() -> list:
     return [dict(r) for r in rows]
 
 
-def fetch_users_with_messages() -> list:
+def fetch_users_with_messages(search_query: str = "") -> list:
     ensure_admin_schema()
     db = get_db()
-    users = [
-        dict(r)
-        for r in db.execute(
-            """
-            SELECT id, key_code, client_name, status, status_text, is_muted, admin_note
-            FROM access_keys
-            ORDER BY id DESC
-            """
-        ).fetchall()
-    ]
+    q = (search_query or "").strip().lower()
+    if q:
+        like_q = f"%{q}%"
+        users = [
+            dict(r)
+            for r in db.execute(
+                """
+                SELECT id, key_code, client_name, status, status_text, is_muted, admin_note, is_paid
+                FROM access_keys
+                WHERE LOWER(COALESCE(client_name, '')) LIKE ? OR LOWER(COALESCE(key_code, '')) LIKE ?
+                ORDER BY id DESC
+                """,
+                (like_q, like_q),
+            ).fetchall()
+        ]
+    else:
+        users = [
+            dict(r)
+            for r in db.execute(
+                """
+                SELECT id, key_code, client_name, status, status_text, is_muted, admin_note, is_paid
+                FROM access_keys
+                ORDER BY id DESC
+                """
+            ).fetchall()
+        ]
 
     all_msgs = []
     try:
@@ -205,7 +220,7 @@ def render_admin_login(error: str = "") -> str:
     <body>
         <form class="card" action="/admin/login" method="POST">
             <h1>GHOSTCORE ADMIN</h1>
-            <p>Авторизация для управления пользователями, баннерами и чатом</p>
+            <p>Авторизация для управления пользователями, тарифами, баннерами и чатом</p>
             {err_block}
             <input type="text" name="login" class="field" placeholder="Логин" required>
             <input type="password" name="password" class="field" placeholder="Пароль" required>
@@ -231,6 +246,51 @@ def admin_logout():
     resp = RedirectResponse(url="/admin", status_code=303)
     resp.delete_cookie(key=ADMIN_COOKIE_NAME)
     return resp
+
+
+@router.post("/admin/users/create")
+def admin_create_user(request: Request, client_name: str = Form(...), is_paid: str = Form("off")):
+    if not is_admin_logged_in(request):
+        return RedirectResponse(url="/admin", status_code=303)
+    ensure_admin_schema()
+    clean_name = client_name.strip()
+    if not clean_name:
+        return RedirectResponse(url="/admin?message=Укажите+имя+пользователя#users", status_code=303)
+
+    db = get_db()
+    dup = db.execute(
+        "SELECT id FROM access_keys WHERE LOWER(TRIM(client_name)) = LOWER(?)",
+        (clean_name,),
+    ).fetchone()
+    if dup:
+        db.close()
+        return RedirectResponse(url="/admin?message=Ошибка:+имя+уже+занято#users", status_code=303)
+
+    import uuid as _uuid
+    new_key = str(_uuid.uuid4())[:8].upper()
+    paid_flag = 1 if is_paid in ("on", "1", "true", "yes") else 0
+    db.execute(
+        "INSERT INTO access_keys (key_code, status, client_name, is_paid) VALUES (?, 'active', ?, ?)",
+        (new_key, clean_name, paid_flag),
+    )
+    db.commit()
+    db.close()
+    return RedirectResponse(url=f"/admin?message=Создан+ключ+{new_key}#users", status_code=303)
+
+
+@router.post("/admin/users/toggle-paid")
+def admin_toggle_user_paid(request: Request, user_id: int = Form(...)):
+    if not is_admin_logged_in(request):
+        return RedirectResponse(url="/admin", status_code=303)
+    ensure_admin_schema()
+    db = get_db()
+    row = db.execute("SELECT is_paid FROM access_keys WHERE id = ?", (user_id,)).fetchone()
+    if row:
+        next_paid = 0 if int(row["is_paid"] or 0) == 1 else 1
+        db.execute("UPDATE access_keys SET is_paid = ? WHERE id = ?", (next_paid, user_id))
+        db.commit()
+    db.close()
+    return RedirectResponse(url="/admin?message=Тариф+пользователя+обновлён#paid-users", status_code=303)
 
 
 @router.post("/admin/users/toggle-ban")
@@ -290,93 +350,116 @@ def admin_delete_user(request: Request, user_id: int = Form(...)):
     return RedirectResponse(url="/admin?message=Пользователь+удалён#users", status_code=303)
 
 
+def _render_user_card(u: dict) -> str:
+    u_name = u.get("client_name") or "Без имени"
+    u_key = u.get("key_code") or "—"
+    is_banned = (u.get("status") == "banned")
+    is_muted = int(u.get("is_muted") or 0) == 1
+    is_paid = int(u.get("is_paid") or 0) == 1
+    note_val = u.get("admin_note") or ""
+
+    paid_badge = (
+        '<span class="badge badge-paid">ОПЛАЧЕНО / VIP</span>'
+        if is_paid
+        else '<span class="badge badge-off">FREE</span>'
+    )
+    ban_badge = (
+        '<span class="badge badge-danger">ЗАБАНЕН</span>'
+        if is_banned
+        else '<span class="badge badge-on">АКТИВЕН</span>'
+    )
+    mute_badge = (
+        '<span class="badge badge-warn">В МУТЕ</span>'
+        if is_muted
+        else '<span class="badge badge-off">ЧАТ ОК</span>'
+    )
+
+    u_msgs = u.get("messages") or []
+    if not u_msgs:
+        msgs_block = '<div class="u-msg-empty">Сообщений в чате не найдено.</div>'
+    else:
+        items_str = "".join(
+            f'<div class="u-msg-line">• {m.get("text") or ""}</div>'
+            for m in u_msgs
+        )
+        msgs_block = f'<div class="u-msg-box">{items_str}</div>'
+
+    return f"""
+    <div class="u-card">
+        <div class="u-top">
+            <div>
+                <div class="u-name">{u_name}</div>
+                <div class="u-key">Ключ: <code>{u_key}</code></div>
+            </div>
+            <div class="u-badges">
+                {paid_badge}
+                {ban_badge}
+                {mute_badge}
+            </div>
+        </div>
+
+        <div class="u-actions">
+            <form action="/admin/users/toggle-paid" method="POST" style="margin:0;">
+                <input type="hidden" name="user_id" value="{u["id"]}">
+                <button type="submit" class="btn-sm btn-paid">
+                    {"Снять VIP" if is_paid else "Перенести в VIP"}
+                </button>
+            </form>
+            <form action="/admin/users/toggle-ban" method="POST" style="margin:0;">
+                <input type="hidden" name="user_id" value="{u["id"]}">
+                <button type="submit" class="btn-sm btn-danger">
+                    {"Разбанить" if is_banned else "Забанить"}
+                </button>
+            </form>
+            <form action="/admin/users/toggle-mute" method="POST" style="margin:0;">
+                <input type="hidden" name="user_id" value="{u["id"]}">
+                <button type="submit" class="btn-sm btn-warn">
+                    {"Размутить" if is_muted else "Замутить в чате"}
+                </button>
+            </form>
+            <form action="/admin/users/delete" method="POST" style="margin:0;">
+                <input type="hidden" name="user_id" value="{u["id"]}">
+                <button type="submit" class="btn-sm btn-ghost">Удалить</button>
+            </form>
+        </div>
+
+        <form action="/admin/users/note" method="POST" class="u-note-form">
+            <input type="hidden" name="user_id" value="{u["id"]}">
+            <input type="text" name="admin_note" class="field-mini" value="{note_val}" placeholder="Заметка о пользователе...">
+            <button type="submit" class="btn-sm btn-ghost">Сохранить</button>
+        </form>
+
+        <details class="u-details">
+            <summary class="u-summary">СМС пользователя в чате ({len(u_msgs)})</summary>
+            {msgs_block}
+        </details>
+    </div>
+    """
+
+
 @router.get("/admin", response_class=HTMLResponse)
-def admin_dashboard(request: Request, message: str = ""):
+def admin_dashboard(request: Request, message: str = "", q: str = ""):
     if not is_admin_logged_in(request):
         return HTMLResponse(content=render_admin_login())
 
     banners = fetch_banners_list()
-    users = fetch_users_with_messages()
+    users = fetch_users_with_messages(search_query=q)
+    paid_users = [u for u in users if int(u.get("is_paid") or 0) == 1]
     messages = get_recent_chat_messages(limit=30)
 
     msg_html = f'<div class="notice">{message}</div>' if message else ""
 
-    users_html = ""
-    if not users:
-        users_html = '<div class="empty">Пользователей и ключей пока нет.</div>'
-    else:
-        for u in users:
-            u_name = u.get("client_name") or "Без имени"
-            u_key = u.get("key_code") or "—"
-            is_banned = (u.get("status") == "banned")
-            is_muted = int(u.get("is_muted") or 0) == 1
-            note_val = u.get("admin_note") or ""
+    paid_html = (
+        '<div class="empty">Оплативших пользователей пока нет. Переведите нужного клиента в VIP кнопкой ниже.</div>'
+        if not paid_users
+        else "".join(_render_user_card(u) for u in paid_users)
+    )
 
-            ban_badge = (
-                '<span class="badge badge-danger">ЗАБАНЕН</span>'
-                if is_banned
-                else '<span class="badge badge-on">АКТИВЕН</span>'
-            )
-            mute_badge = (
-                '<span class="badge badge-warn">В МУТЕ</span>'
-                if is_muted
-                else '<span class="badge badge-off">ЧАТ ОК</span>'
-            )
-
-            u_msgs = u.get("messages") or []
-            if not u_msgs:
-                msgs_block = '<div class="u-msg-empty">Сообщений в чате не найдено.</div>'
-            else:
-                items_str = "".join(
-                    f'<div class="u-msg-line">• {m.get("text") or ""}</div>'
-                    for m in u_msgs
-                )
-                msgs_block = f'<div class="u-msg-box">{items_str}</div>'
-
-            users_html += f"""
-            <div class="u-card">
-                <div class="u-top">
-                    <div>
-                        <div class="u-name">{u_name}</div>
-                        <div class="u-key">Ключ: <code>{u_key}</code></div>
-                    </div>
-                    <div class="u-badges">
-                        {ban_badge}
-                        {mute_badge}
-                    </div>
-                </div>
-
-                <div class="u-actions">
-                    <form action="/admin/users/toggle-ban" method="POST" style="margin:0;">
-                        <input type="hidden" name="user_id" value="{u["id"]}">
-                        <button type="submit" class="btn-sm btn-danger">
-                            {"Разбанить" if is_banned else "Забанить"}
-                        </button>
-                    </form>
-                    <form action="/admin/users/toggle-mute" method="POST" style="margin:0;">
-                        <input type="hidden" name="user_id" value="{u["id"]}">
-                        <button type="submit" class="btn-sm btn-warn">
-                            {"Размутить" if is_muted else "Замутить в чате"}
-                        </button>
-                    </form>
-                    <form action="/admin/users/delete" method="POST" style="margin:0;">
-                        <input type="hidden" name="user_id" value="{u["id"]}">
-                        <button type="submit" class="btn-sm btn-ghost">Удалить</button>
-                    </form>
-                </div>
-
-                <form action="/admin/users/note" method="POST" class="u-note-form">
-                    <input type="hidden" name="user_id" value="{u["id"]}">
-                    <input type="text" name="admin_note" class="field-mini" value="{note_val}" placeholder="Заметка о пользователе...">
-                    <button type="submit" class="btn-sm btn-ghost">Сохранить</button>
-                </form>
-
-                <details class="u-details">
-                    <summary class="u-summary">СМС пользователя в чате ({len(u_msgs)})</summary>
-                    {msgs_block}
-                </details>
-            </div>
-            """
+    users_html = (
+        '<div class="empty">Пользователи не найдены.</div>'
+        if not users
+        else "".join(_render_user_card(u) for u in users)
+    )
 
     banner_rows_html = ""
     if not banners:
@@ -520,6 +603,11 @@ def admin_dashboard(request: Request, message: str = ""):
                 font-size: 12px;
                 outline: none;
             }}
+            .search-row {{
+                display: flex;
+                gap: 6px;
+                margin-bottom: 10px;
+            }}
             .row-2 {{
                 display: grid;
                 grid-template-columns: 1fr 1fr;
@@ -575,6 +663,11 @@ def admin_dashboard(request: Request, message: str = ""):
                 font-weight: 700;
                 cursor: pointer;
                 border: 1px solid var(--border);
+            }}
+            .btn-paid {{
+                background: rgba(56, 189, 248, 0.16);
+                border-color: rgba(56, 189, 248, 0.55);
+                color: #7dd3fc;
             }}
             .btn-danger {{
                 background: rgba(255, 30, 66, 0.16);
@@ -680,6 +773,11 @@ def admin_dashboard(request: Request, message: str = ""):
                 padding: 2px 7px;
                 border-radius: 999px;
             }}
+            .badge-paid {{
+                background: rgba(56, 189, 248, 0.16);
+                color: #7dd3fc;
+                border: 1px solid rgba(56, 189, 248, 0.4);
+            }}
             .badge-on {{
                 background: rgba(34, 197, 94, 0.15);
                 color: #86efac;
@@ -747,8 +845,32 @@ def admin_dashboard(request: Request, message: str = ""):
 
             {msg_html}
 
+            <section id="paid-users" class="card">
+                <div class="card-title">Оплатившие / VIP пользователи ({len(paid_users)})</div>
+                {paid_html}
+            </section>
+
             <section id="users" class="card">
                 <div class="card-title">Пользователи и ключи ({len(users)})</div>
+
+                <form action="/admin" method="GET" class="search-row">
+                    <input type="text" name="q" class="field-mini" value="{q}" placeholder="Поиск по имени или ключу...">
+                    <button type="submit" class="btn-sm btn-ghost">Найти</button>
+                    <a href="/admin#users" class="btn-sm btn-ghost">Сброс</a>
+                </form>
+
+                <form action="/admin/users/create" method="POST" style="margin-bottom:10px;padding-bottom:10px;border-bottom:1px solid #260d14;">
+                    <label class="lbl">Выдать новый ключ (уникальное имя)</label>
+                    <div class="search-row" style="margin-bottom:6px;">
+                        <input type="text" name="client_name" class="field-mini" placeholder="Имя клиента" required>
+                        <button type="submit" class="btn-sm btn-danger">+ Ключ</button>
+                    </div>
+                    <label class="check-line" style="margin:0;">
+                        <input type="checkbox" name="is_paid">
+                        <span>Сразу выдать оплаченный VIP-доступ</span>
+                    </label>
+                </form>
+
                 {users_html}
             </section>
 
@@ -787,6 +909,14 @@ def admin_dashboard(request: Request, message: str = ""):
             <section class="card">
                 <div class="card-title">Баннеры и таймеры ({len(banners)})</div>
                 {banner_rows_html}
+                <div class="b-actions" style="margin-top:10px;padding-top:8px;border-top:1px solid #260d14;">
+                    <form action="/admin/banner/disable" method="POST" style="margin:0;">
+                        <button type="submit" class="btn-sm btn-ghost">Отключить старый баннер</button>
+                    </form>
+                    <form action="/admin/banner/clear-legacy" method="POST" style="margin:0;">
+                        <button type="submit" class="btn-sm btn-danger">Очистить старый баннер</button>
+                    </form>
+                </div>
             </section>
 
             <section class="card">
