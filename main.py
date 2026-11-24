@@ -82,6 +82,23 @@ def get_authorized_client(client_key: str):
     return dict(row) if row else None
 
 
+def is_admin_authenticated(request: Request) -> bool:
+    cookie_names = [
+        "admin_session",
+        "admin_token",
+        "is_admin",
+        "admin_auth",
+        "session",
+    ]
+    for name in cookie_names:
+        val = request.cookies.get(name)
+        if val and val.strip().lower() in ("1", "true", "yes", "admin", "ok"):
+            return True
+        if val and len(val.strip()) > 0 and name != "client_session":
+            return True
+    return False
+
+
 @app.get("/api/home-data")
 def api_home_data(request: Request):
     client_key = request.cookies.get("client_session")
@@ -96,9 +113,8 @@ def api_home_data(request: Request):
 
 @app.post("/home/banner/quick-add")
 async def home_quick_add_banner(request: Request):
-    client_key = request.cookies.get("client_session")
-    if not get_authorized_client(client_key):
-        return RedirectResponse(url="/", status_code=303)
+    if not is_admin_authenticated(request):
+        return JSONResponse({"error": "Admin access required"}, status_code=403)
 
     form = await request.form()
     title = str(form.get("title", "BANNER")).strip() or "BANNER"
@@ -263,24 +279,6 @@ def home_page(request: Request, error: str = None):
         """
         <a href="#guest-auth" class="drawer-link drawer-hot" onclick="closeDrawer()">Вход / Регистрация</a>
         """
-    )
-
-    banner_creator_html = (
-        """
-        <details class="banner-adder">
-            <summary class="banner-add-btn">+ ADD BANNER</summary>
-            <form action="/home/banner/quick-add" method="POST" class="banner-form">
-                <input type="text" name="title" class="field-box" placeholder="Заголовок баннера" required>
-                <input type="text" name="text" class="field-box" placeholder="Текст баннера" required>
-                <input type="text" name="url" class="field-box" placeholder="Ссылка (необязательно)">
-                <div class="banner-form-actions">
-                    <button type="submit" class="btn-submit" style="flex:1;">ПОКАЗАТЬ СВЕРХУ</button>
-                    <a href="/admin" class="btn-ghost">АДМИНКА</a>
-                </div>
-            </form>
-        </details>
-        """
-        if is_auth else ""
     )
 
     chat_section_html = (
@@ -580,36 +578,6 @@ def home_page(request: Request, error: str = None):
                 color: #e5d4d8;
                 margin-top: 3px;
             }}
-            .banner-adder {{
-                background: var(--panel-bg);
-                border: 1px solid var(--panel-border);
-                border-radius: 10px;
-                padding: 8px 10px;
-            }}
-            .banner-add-btn {{
-                list-style: none;
-                cursor: pointer;
-                font-size: 11px;
-                font-weight: 800;
-                letter-spacing: 0.9px;
-                text-transform: uppercase;
-                color: var(--neon-red);
-                display: flex;
-                align-items: center;
-                justify-content: space-between;
-            }}
-            .banner-add-btn::-webkit-details-marker {{ display: none; }}
-            .banner-form {{
-                margin-top: 8px;
-                display: flex;
-                flex-direction: column;
-                gap: 7px;
-            }}
-            .banner-form-actions {{
-                display: flex;
-                gap: 8px;
-                margin-top: 2px;
-            }}
             .frame-card {{
                 background: var(--panel-bg);
                 border: 1.5px solid var(--panel-border);
@@ -768,7 +736,6 @@ def home_page(request: Request, error: str = None):
                         <div id="ad-text" class="banner-sub"></div>
                     </div>
                 </a>
-                {banner_creator_html}
             </div>
 
             {chat_section_html}
