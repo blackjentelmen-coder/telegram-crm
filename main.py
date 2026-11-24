@@ -15,6 +15,8 @@ from telethon.sessions import StringSession
 from database import (
     init_db,
     get_db,
+    get_client_profile,
+    update_client_profile,
     get_banner,
     update_banner_db,
     add_chat_message,
@@ -73,7 +75,7 @@ def get_authorized_client(client_key: str):
         return None
     db = get_db()
     row = db.execute(
-        "SELECT id, key_code, client_name, status FROM access_keys WHERE key_code = ?",
+        "SELECT id, key_code, client_name, status_text, status FROM access_keys WHERE key_code = ?",
         (client_key.strip().upper(),),
     ).fetchone()
     db.close()
@@ -90,6 +92,29 @@ def api_home_data(request: Request):
         "messages": messages,
         "authenticated": bool(user),
     })
+
+
+@app.get("/api/profile")
+def api_get_profile(request: Request):
+    client_key = request.cookies.get("client_session")
+    profile = get_client_profile(client_key)
+    if not profile:
+        return JSONResponse({"authenticated": False}, status_code=401)
+    return JSONResponse({"authenticated": True, "profile": profile})
+
+
+@app.post("/cabinet/update-profile")
+async def update_profile_route(request: Request):
+    client_key = request.cookies.get("client_session")
+    profile = get_client_profile(client_key)
+    if not profile:
+        return RedirectResponse(url="/", status_code=303)
+
+    form = await request.form()
+    new_name = str(form.get("client_name", ""))
+    new_status = str(form.get("status_text", ""))
+    update_client_profile(client_key, new_name, new_status)
+    return RedirectResponse(url="/cabinet?message=Профиль+сохранён#profile", status_code=303)
 
 
 @app.websocket("/ws/chat")
@@ -231,9 +256,11 @@ def home_page(request: Request, error: str = None):
         if is_auth else ""
     )
 
+    user_status_line = f' • <span>{user.get("status_text")}</span>' if (is_auth and user.get("status_text")) else ""
+
     access_block_html = (
         f"""
-        <div class="user-badge">АККАУНТ: <b>{user.get("client_name") or user["key_code"]}</b></div>
+        <div class="user-badge">АККАУНТ: <b>{user.get("client_name") or user["key_code"]}</b>{user_status_line}</div>
         <div class="btn-pair">
             <a href="/cabinet" class="btn-submit" style="text-decoration:none;flex:1 1 auto;">OPEN CABINET</a>
             <a href="/logout-client" class="btn-ghost" style="text-decoration:none;flex:0 0 auto;">EXIT</a>
