@@ -25,7 +25,6 @@ def init_db():
         )
     """)
 
-    # Мягкая миграция на случай, если таблица уже существовала без status_text
     cols = [r["name"] for r in cursor.execute("PRAGMA table_info(access_keys)").fetchall()]
     if "status_text" not in cols:
         cursor.execute("ALTER TABLE access_keys ADD COLUMN status_text TEXT DEFAULT 'В сети'")
