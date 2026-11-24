@@ -32,7 +32,7 @@
             margin: 0 auto;
         }
 
-        /* Верхняя шапка с 3 полосками слева */
+        /* Верхняя шапка */
         .nav-bar {
             display: flex;
             align-items: center;
@@ -86,7 +86,7 @@
             white-space: nowrap;
         }
 
-        /* Выдвижное меню функций слева */
+        /* Боковое меню слева */
         .drawer-mask {
             position: fixed;
             inset: 0;
@@ -99,7 +99,7 @@
             position: fixed;
             top: 0;
             left: 0;
-            width: 275px;
+            width: 270px;
             max-width: 82vw;
             height: 100vh;
             background: #0d080b;
@@ -156,7 +156,7 @@
             background: rgba(255, 30, 66, 0.14);
         }
 
-        /* Карточки */
+        /* Карточка активного раздела */
         .frame-card {
             background: var(--panel-bg);
             border: 1.5px solid var(--panel-border);
@@ -171,7 +171,7 @@
             letter-spacing: 1px;
             text-transform: uppercase;
             color: var(--text-main);
-            margin-bottom: 10px;
+            margin-bottom: 12px;
         }
         .field-label {
             display: block;
@@ -205,7 +205,7 @@
         .btn-red {
             width: 100%;
             padding: 11px 14px;
-            margin-top: 10px;
+            margin-top: 12px;
             border: none;
             border-radius: 8px;
             background: linear-gradient(135deg, #c71230, var(--neon-red));
@@ -243,32 +243,7 @@
             letter-spacing: 1px;
             text-transform: uppercase;
             color: var(--text-muted);
-            margin: 10px 0 4px 0;
-        }
-
-        /* Переключатели функций внутри панели */
-        .tabs-row {
-            display: grid;
-            grid-template-columns: repeat(3, 1fr);
-            gap: 8px;
-            margin-bottom: 12px;
-        }
-        .tab-btn {
-            padding: 9px 6px;
-            border-radius: 8px;
-            background: #140a0e;
-            border: 1px solid #351119;
-            color: var(--text-main);
-            font-size: 11px;
-            font-weight: 800;
-            text-transform: uppercase;
-            cursor: pointer;
-            white-space: nowrap;
-        }
-        .tab-btn.active {
-            border-color: var(--neon-red);
-            background: rgba(255, 30, 66, 0.14);
-            box-shadow: 0 0 10px var(--neon-red-soft);
+            margin: 12px 0 4px 0;
         }
         .mode-grid {
             display: grid;
@@ -315,14 +290,14 @@
             <button type="button" class="drawer-close" onclick="closeDrawer()">✕</button>
         </div>
 
-        <div class="drawer-cap">Функции кабинета</div>
-        <button type="button" id="menu-spammer" class="drawer-btn active" onclick="selectFunction('spammer'); closeDrawer();">🚀 Спамер</button>
-        <button type="button" id="menu-inviter" class="drawer-btn" onclick="selectFunction('inviter'); closeDrawer();">👥 Инвайтер</button>
-        <button type="button" id="menu-parser" class="drawer-btn" onclick="selectFunction('parser'); closeDrawer();">🔍 Парсер</button>
-        <button type="button" class="drawer-btn" onclick="focusAccounts(); closeDrawer();">📱 Telegram аккаунты</button>
+        <div class="drawer-cap">Функции</div>
+        <button type="button" id="nav-spammer" class="drawer-btn active" onclick="openSection('spammer'); closeDrawer();">🚀 Спамер</button>
+        <button type="button" id="nav-inviter" class="drawer-btn" onclick="openSection('inviter'); closeDrawer();">👥 Инвайтер</button>
+        <button type="button" id="nav-parser" class="drawer-btn" onclick="openSection('parser'); closeDrawer();">🔍 Парсер</button>
+        <button type="button" id="nav-accounts" class="drawer-btn" onclick="openSection('accounts'); closeDrawer();">📱 Telegram аккаунты</button>
 
-        <div class="drawer-cap">Разделы сайта</div>
-        <a href="/" class="drawer-btn">🏠 Главная (Баннер и Чат)</a>
+        <div class="drawer-cap">Навигация</div>
+        <a href="/" class="drawer-btn">🏠 Главная</a>
         <a href="/admin" class="drawer-btn">⚙️ Админ-панель</a>
         <a href="/logout-client" class="drawer-btn">🚪 Выйти</a>
     </aside>
@@ -335,14 +310,15 @@
                     <span></span>
                     <span></span>
                 </button>
-                <div class="logo-title">GHOSTCORE</div>
+                <div class="logo-title" id="section-header-title">СПАМЕР</div>
             </div>
             <a href="/logout-client" class="exit-link">Выйти</a>
         </header>
 
         <div id="status-toast" class="toast"></div>
 
-        <section id="accounts-section" class="frame-card">
+        <!-- Раздел 1: Telegram аккаунты (показывается только при выборе в меню) -->
+        <section id="sec-accounts" class="frame-card" style="display: none;">
             <div class="frame-title">TELEGRAM АККАУНТЫ</div>
             <form action="/cabinet/add-account" method="POST">
                 <input type="text" name="phone" class="field-box" placeholder="+380..." required>
@@ -352,21 +328,16 @@
             <a href="/cabinet/start-qr" class="btn-green">ВХОД ПО QR-КОДУ</a>
         </section>
 
-        <section class="frame-card">
-            <div class="frame-title">ПАНЕЛЬ ИНСТРУМЕНТОВ</div>
-
-            <div class="tabs-row">
-                <button type="button" id="tab-spammer" class="tab-btn active" onclick="selectFunction('spammer')">🚀 СПАМЕР</button>
-                <button type="button" id="tab-inviter" class="tab-btn" onclick="selectFunction('inviter')">👥 ИНВАЙТЕР</button>
-                <button type="button" id="tab-parser" class="tab-btn" onclick="selectFunction('parser')">🔍 ПАРСЕР</button>
-            </div>
-
+        <!-- Раздел 2: Инструмент (показывается выбранный инструмент без дублирующих вкладок) -->
+        <section id="sec-tool" class="frame-card">
             <form action="/cabinet/run-task" method="POST">
                 <input type="hidden" id="task_type" name="task_type" value="spammer">
                 <input type="hidden" id="target_type" name="target_type" value="chats">
                 <input type="hidden" id="spam_mode" name="spam_mode" value="text">
 
                 <div id="block-spammer">
+                    <div class="frame-title">НАСТРОЙКИ СПАМЕРА</div>
+
                     <label class="field-label">БАЗА ЦЕЛЕЙ (ЧАТЫ ИЛИ ЛЮДИ ЧЕРЕЗ СТРОКУ):</label>
                     <textarea name="spam_targets" class="area-box" placeholder="https://t.me/chat_target"></textarea>
 
@@ -411,6 +382,8 @@
                 </div>
 
                 <div id="block-inviter" style="display: none;">
+                    <div class="frame-title">НАСТРОЙКИ ИНВАЙТЕРА</div>
+
                     <label class="field-label">ЦЕЛЕВОЙ ЧАТ ДЛЯ ИНВАЙТА:</label>
                     <input type="text" name="inviter_target" class="field-box" placeholder="https://t.me/your_chat">
 
@@ -436,6 +409,8 @@
                 </div>
 
                 <div id="block-parser" style="display: none;">
+                    <div class="frame-title">НАСТРОЙКИ ПАРСЕРА</div>
+
                     <label class="field-label">ЧАТЫ ДЛЯ ПАРСИНГА (ЧЕРЕЗ СТРОКУ):</label>
                     <textarea name="parser_targets" class="area-box" placeholder="https://t.me/target_chat"></textarea>
 
@@ -458,6 +433,13 @@
         const drawer = document.getElementById("side-drawer");
         const mask = document.getElementById("drawer-mask");
 
+        const titles = {
+            spammer: "СПАМЕР",
+            inviter: "ИНВАЙТЕР",
+            parser: "ПАРСЕР",
+            accounts: "АККАУНТЫ"
+        };
+
         function openDrawer() {
             drawer.classList.add("open");
             mask.classList.add("open");
@@ -466,19 +448,27 @@
             drawer.classList.remove("open");
             mask.classList.remove("open");
         }
-        function focusAccounts() {
-            document.getElementById("accounts-section").scrollIntoView({ behavior: "smooth" });
-        }
 
-        function selectFunction(fn) {
-            document.getElementById("task_type").value = fn;
-
-            ["spammer", "inviter", "parser"].forEach(name => {
-                document.getElementById("block-" + name).style.display = (name === fn) ? "block" : "none";
-                document.getElementById("tab-" + name).classList.toggle("active", name === fn);
-                const menuItem = document.getElementById("menu-" + name);
-                if (menuItem) menuItem.classList.toggle("active", name === fn);
+        function openSection(section) {
+            ["spammer", "inviter", "parser", "accounts"].forEach(id => {
+                const navBtn = document.getElementById("nav-" + id);
+                if (navBtn) navBtn.classList.toggle("active", id === section);
             });
+
+            document.getElementById("section-header-title").textContent = titles[section] || "GHOSTCORE";
+
+            if (section === "accounts") {
+                document.getElementById("sec-accounts").style.display = "block";
+                document.getElementById("sec-tool").style.display = "none";
+            } else {
+                document.getElementById("sec-accounts").style.display = "none";
+                document.getElementById("sec-tool").style.display = "block";
+                document.getElementById("task_type").value = section;
+
+                ["spammer", "inviter", "parser"].forEach(tool => {
+                    document.getElementById("block-" + tool).style.display = (tool === section) ? "block" : "none";
+                });
+            }
         }
 
         function setTargetType(val) {
@@ -503,9 +493,10 @@
             toast.style.display = "block";
         }
 
-        if (window.location.hash === "#inviter") selectFunction("inviter");
-        if (window.location.hash === "#parser") selectFunction("parser");
-        if (window.location.hash === "#spammer") selectFunction("spammer");
+        if (window.location.hash === "#inviter") openSection("inviter");
+        else if (window.location.hash === "#parser") openSection("parser");
+        else if (window.location.hash === "#accounts") openSection("accounts");
+        else openSection("spammer");
     </script>
 </body>
 </html>
