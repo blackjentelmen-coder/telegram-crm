@@ -21,13 +21,28 @@ def init_db():
             status TEXT DEFAULT 'free',
             client_name TEXT,
             status_text TEXT DEFAULT 'В сети',
-            note TEXT
+            note TEXT,
+            is_muted INTEGER NOT NULL DEFAULT 0,
+            admin_note TEXT NOT NULL DEFAULT '',
+            is_paid INTEGER NOT NULL DEFAULT 0,
+            tg_user_id INTEGER,
+            tg_username TEXT NOT NULL DEFAULT ''
         )
     """)
 
     cols = [r["name"] for r in cursor.execute("PRAGMA table_info(access_keys)").fetchall()]
     if "status_text" not in cols:
         cursor.execute("ALTER TABLE access_keys ADD COLUMN status_text TEXT DEFAULT 'В сети'")
+    if "is_muted" not in cols:
+        cursor.execute("ALTER TABLE access_keys ADD COLUMN is_muted INTEGER NOT NULL DEFAULT 0")
+    if "admin_note" not in cols:
+        cursor.execute("ALTER TABLE access_keys ADD COLUMN admin_note TEXT NOT NULL DEFAULT ''")
+    if "is_paid" not in cols:
+        cursor.execute("ALTER TABLE access_keys ADD COLUMN is_paid INTEGER NOT NULL DEFAULT 0")
+    if "tg_user_id" not in cols:
+        cursor.execute("ALTER TABLE access_keys ADD COLUMN tg_user_id INTEGER")
+    if "tg_username" not in cols:
+        cursor.execute("ALTER TABLE access_keys ADD COLUMN tg_username TEXT NOT NULL DEFAULT ''")
 
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS client_tg_accounts (
@@ -79,13 +94,23 @@ def init_db():
     conn.close()
 
 
+def ensure_bot_schema():
+    init_db()
+
+
 def get_client_profile(key_code: str):
     if not key_code:
         return None
+    init_db()
     clean_key = key_code.strip().upper()
     conn = get_db()
     row = conn.execute(
-        "SELECT id, key_code, status, client_name, status_text, note FROM access_keys WHERE key_code = ?",
+        """
+        SELECT id, key_code, status, client_name, status_text, note,
+               is_muted, admin_note, is_paid, tg_user_id, tg_username
+        FROM access_keys
+        WHERE key_code = ?
+        """,
         (clean_key,),
     ).fetchone()
     if not row:
@@ -194,3 +219,70 @@ def clear_chat_messages_db():
     conn.execute("DELETE FROM chat_messages")
     conn.commit()
     conn.close()
+
+
+def link_tg_to_key(key_code: str, tg_user_id: int, tg_username: str = "") -> dict:
+    init_db()
+    clean_key = (key_code or "").strip().upper()
+    conn = get_db()
+    row = conn.execute(
+        "SELECT id, key_code, client_name, status, is_paid FROM access_keys WHERE key_code = ?",
+        (clean_key,),
+    ).fetchone()
+    if not row:
+        conn.close()
+        return {"ok": False, "error": "Ключ не найден."}
+    if (row["status"] or "").lower() == "banned":
+        conn.close()
+        return {"ok": False, "error": "Этот ключ заблокирован."}
+
+    conn.execute(
+        "UPDATE access_keys SET tg_user_id = ?, tg_username = ? WHERE id = ?",
+        (int(tg_user_id), (tg_username or "").strip(), row["id"]),
+    )
+    conn.commit()
+    conn.close()
+    return {"ok": True, "user": dict(row)}
+
+
+def get_user_by_tg_id(tg_user_id: int):
+    init_db()
+    conn = get_db()
+    row = conn.execute(
+        "SELECT id, key_code, client_name, status, is_paid, tg_user_id FROM access_keys WHERE tg_user_id = ?",
+        (int(tg_user_id),),
+    ).fetchone()
+    conn.close()
+    if not row:
+        return None
+    data = dict(row)
+    if (data.get("status") or "").lower() == "banned":
+        return None
+    return data
+
+
+def get_user_by_key(key_code: str):
+    init_db()
+    clean_key = (key_code or "").strip().upper()
+    conn = get_db()
+    row = conn.execute(
+        "SELECT id, key_code, client_name, status, is_paid, tg_user_id FROM access_keys WHERE key_code = ?",
+        (clean_key,),
+    ).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def get_active_client_tg_accounts(client_key: str) -> list:
+    conn = get_db()
+    rows = conn.execute(
+        """
+        SELECT id, client_key, phone, session_string, status
+        FROM client_tg_accounts
+        WHERE client_key = ? AND status = 'Активен'
+        ORDER BY id DESC
+        """,
+        ((client_key or "").strip().upper(),),
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
