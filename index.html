@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>GHOSTCORE | Кабинет</title>
+    <title>GHOSTCORE | Личный кабинет</title>
     <style>
         :root {
             --bg-main: #060609;
@@ -31,8 +31,6 @@
             max-width: 430px;
             margin: 0 auto;
         }
-
-        /* Верхняя шапка */
         .nav-bar {
             display: flex;
             align-items: center;
@@ -67,9 +65,9 @@
             border-radius: 2px;
         }
         .logo-title {
-            font-size: 19px;
+            font-size: 18px;
             font-weight: 800;
-            letter-spacing: 2px;
+            letter-spacing: 1.5px;
             color: var(--neon-red);
             text-shadow: 0 0 12px var(--neon-red-soft);
             text-transform: uppercase;
@@ -85,8 +83,6 @@
             font-weight: 600;
             white-space: nowrap;
         }
-
-        /* Боковое меню слева */
         .drawer-mask {
             position: fixed;
             inset: 0;
@@ -99,7 +95,7 @@
             position: fixed;
             top: 0;
             left: 0;
-            width: 270px;
+            width: 275px;
             max-width: 82vw;
             height: 100vh;
             background: #0d080b;
@@ -155,8 +151,6 @@
             border-color: var(--neon-red);
             background: rgba(255, 30, 66, 0.14);
         }
-
-        /* Карточка активного раздела */
         .frame-card {
             background: var(--panel-bg);
             border: 1.5px solid var(--panel-border);
@@ -201,7 +195,58 @@
             resize: vertical;
             font-family: inherit;
         }
-
+        .key-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+            background: #090507;
+            border: 1px solid var(--neon-red);
+            border-radius: 8px;
+            padding: 10px 12px;
+        }
+        .key-val {
+            font-family: monospace;
+            font-size: 16px;
+            font-weight: 800;
+            letter-spacing: 1.5px;
+            color: #fff;
+            user-select: all;
+        }
+        .copy-btn {
+            padding: 6px 10px;
+            border-radius: 6px;
+            background: #1c0c12;
+            border: 1px solid var(--panel-border);
+            color: var(--text-main);
+            font-size: 11px;
+            font-weight: 700;
+            cursor: pointer;
+            white-space: nowrap;
+        }
+        .stats-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+            margin-top: 12px;
+        }
+        .stat-box {
+            background: #14090d;
+            border: 1px solid #351119;
+            border-radius: 8px;
+            padding: 10px;
+        }
+        .stat-num {
+            font-size: 16px;
+            font-weight: 800;
+            color: var(--neon-red);
+        }
+        .stat-cap {
+            font-size: 10px;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            margin-top: 2px;
+        }
         .btn-red {
             width: 100%;
             padding: 11px 14px;
@@ -290,14 +335,17 @@
             <button type="button" class="drawer-close" onclick="closeDrawer()">✕</button>
         </div>
 
+        <div class="drawer-cap">Личный кабинет</div>
+        <button type="button" id="nav-profile" class="drawer-btn active" onclick="openSection('profile'); closeDrawer();">👤 Профиль и ключ</button>
+
         <div class="drawer-cap">Функции</div>
-        <button type="button" id="nav-spammer" class="drawer-btn active" onclick="openSection('spammer'); closeDrawer();">🚀 Спамер</button>
+        <button type="button" id="nav-spammer" class="drawer-btn" onclick="openSection('spammer'); closeDrawer();">🚀 Спамер</button>
         <button type="button" id="nav-inviter" class="drawer-btn" onclick="openSection('inviter'); closeDrawer();">👥 Инвайтер</button>
         <button type="button" id="nav-parser" class="drawer-btn" onclick="openSection('parser'); closeDrawer();">🔍 Парсер</button>
         <button type="button" id="nav-accounts" class="drawer-btn" onclick="openSection('accounts'); closeDrawer();">📱 Telegram аккаунты</button>
 
         <div class="drawer-cap">Навигация</div>
-        <a href="/" class="drawer-btn">🏠 Главная</a>
+        <a href="/" class="drawer-btn">💬 Главная и чат</a>
         <a href="/admin" class="drawer-btn">⚙️ Админ-панель</a>
         <a href="/logout-client" class="drawer-btn">🚪 Выйти</a>
     </aside>
@@ -310,14 +358,44 @@
                     <span></span>
                     <span></span>
                 </button>
-                <div class="logo-title" id="section-header-title">СПАМЕР</div>
+                <div class="logo-title" id="section-header-title">КАБИНЕТ</div>
             </div>
             <a href="/logout-client" class="exit-link">Выйти</a>
         </header>
 
         <div id="status-toast" class="toast"></div>
 
-        <!-- Раздел 1: Telegram аккаунты (показывается только при выборе в меню) -->
+        <section id="sec-profile" class="frame-card">
+            <div class="frame-title">ВАШ КЛЮЧ ДОСТУПА</div>
+            <div class="key-row">
+                <span id="profile-key" class="key-val">...</span>
+                <button type="button" class="copy-btn" onclick="copyProfileKey()">Копировать</button>
+            </div>
+
+            <div class="stats-row">
+                <div class="stat-box">
+                    <div id="stat-accs" class="stat-num">0</div>
+                    <div class="stat-cap">TG-аккаунтов</div>
+                </div>
+                <div class="stat-box">
+                    <div id="stat-tasks" class="stat-num">0</div>
+                    <div class="stat-cap">Задач запущено</div>
+                </div>
+            </div>
+
+            <form action="/cabinet/update-profile" method="POST" style="margin-top: 14px;">
+                <div class="frame-title" style="margin-bottom: 6px;">НАСТРОЙКИ ПРОФИЛЯ</div>
+
+                <label class="field-label">ИМЯ / НИКНЕЙМ:</label>
+                <input type="text" id="inp-client-name" name="client_name" class="field-box" placeholder="Введите имя" maxlength="40">
+
+                <label class="field-label">СТАТУС / ПОДПИСЬ:</label>
+                <input type="text" id="inp-status-text" name="status_text" class="field-box" placeholder="Например: Работаю в сети..." maxlength="80">
+
+                <button type="submit" class="btn-red">СОХРАНИТЬ ПРОФИЛЬ</button>
+            </form>
+        </section>
+
         <section id="sec-accounts" class="frame-card" style="display: none;">
             <div class="frame-title">TELEGRAM АККАУНТЫ</div>
             <form action="/cabinet/add-account" method="POST">
@@ -328,8 +406,7 @@
             <a href="/cabinet/start-qr" class="btn-green">ВХОД ПО QR-КОДУ</a>
         </section>
 
-        <!-- Раздел 2: Инструмент (показывается выбранный инструмент без дублирующих вкладок) -->
-        <section id="sec-tool" class="frame-card">
+        <section id="sec-tool" class="frame-card" style="display: none;">
             <form action="/cabinet/run-task" method="POST">
                 <input type="hidden" id="task_type" name="task_type" value="spammer">
                 <input type="hidden" id="target_type" name="target_type" value="chats">
@@ -434,6 +511,7 @@
         const mask = document.getElementById("drawer-mask");
 
         const titles = {
+            profile: "КАБИНЕТ",
             spammer: "СПАМЕР",
             inviter: "ИНВАЙТЕР",
             parser: "ПАРСЕР",
@@ -450,21 +528,19 @@
         }
 
         function openSection(section) {
-            ["spammer", "inviter", "parser", "accounts"].forEach(id => {
+            ["profile", "spammer", "inviter", "parser", "accounts"].forEach(id => {
                 const navBtn = document.getElementById("nav-" + id);
                 if (navBtn) navBtn.classList.toggle("active", id === section);
             });
 
-            document.getElementById("section-header-title").textContent = titles[section] || "GHOSTCORE";
+            document.getElementById("section-header-title").textContent = titles[section] || "КАБИНЕТ";
 
-            if (section === "accounts") {
-                document.getElementById("sec-accounts").style.display = "block";
-                document.getElementById("sec-tool").style.display = "none";
-            } else {
-                document.getElementById("sec-accounts").style.display = "none";
-                document.getElementById("sec-tool").style.display = "block";
+            document.getElementById("sec-profile").style.display = (section === "profile") ? "block" : "none";
+            document.getElementById("sec-accounts").style.display = (section === "accounts") ? "block" : "none";
+            document.getElementById("sec-tool").style.display = (["spammer", "inviter", "parser"].includes(section)) ? "block" : "none";
+
+            if (["spammer", "inviter", "parser"].includes(section)) {
                 document.getElementById("task_type").value = section;
-
                 ["spammer", "inviter", "parser"].forEach(tool => {
                     document.getElementById("block-" + tool).style.display = (tool === section) ? "block" : "none";
                 });
@@ -485,6 +561,31 @@
             document.getElementById("spam-forward-box").style.display = (val === "forward") ? "block" : "none";
         }
 
+        function copyProfileKey() {
+            const keyText = document.getElementById("profile-key").textContent.trim();
+            if (navigator.clipboard && keyText && keyText !== "...") {
+                navigator.clipboard.writeText(keyText).catch(() => {});
+            }
+        }
+
+        async function loadProfile() {
+            try {
+                const res = await fetch("/api/profile");
+                if (!res.ok) return;
+                const data = await res.json();
+                if (!data.authenticated || !data.profile) return;
+
+                const p = data.profile;
+                document.getElementById("profile-key").textContent = p.key_code || "";
+                document.getElementById("inp-client-name").value = p.client_name || "";
+                document.getElementById("inp-status-text").value = p.status_text || "";
+                document.getElementById("stat-accs").textContent = String(p.tg_accounts_count ?? 0);
+                document.getElementById("stat-tasks").textContent = String(p.tasks_count ?? 0);
+            } catch (e) {
+                console.error(e);
+            }
+        }
+
         const params = new URLSearchParams(window.location.search);
         const msg = params.get("message");
         if (msg) {
@@ -495,8 +596,11 @@
 
         if (window.location.hash === "#inviter") openSection("inviter");
         else if (window.location.hash === "#parser") openSection("parser");
+        else if (window.location.hash === "#spammer") openSection("spammer");
         else if (window.location.hash === "#accounts") openSection("accounts");
-        else openSection("spammer");
+        else openSection("profile");
+
+        loadProfile();
     </script>
 </body>
 </html>
