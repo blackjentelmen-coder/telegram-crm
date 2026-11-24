@@ -7,6 +7,8 @@ import base64
 import uuid
 import time
 import sqlite3
+import urllib.request
+import urllib.parse
 from typing import List
 from fastapi import FastAPI, Form, Request, Response, UploadFile, File, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse, RedirectResponse, FileResponse, JSONResponse
@@ -25,6 +27,7 @@ from database import (
     get_recent_chat_messages,
     clear_chat_messages_db,
     delete_chat_message_db,
+    get_user_by_key,
 )
 import admin
 
@@ -34,6 +37,7 @@ import parser
 
 API_ID = 38977487
 API_HASH = "a6afb062a4c36f6d7b2cb87d27385672"
+BOT_TOKEN = os.getenv("GHOSTCORE_BOT_TOKEN", "")
 
 os.makedirs("static/banners", exist_ok=True)
 
@@ -44,6 +48,26 @@ init_db()
 app.include_router(admin.router)
 
 qr_sessions = {}
+
+
+def notify_user_sync(client_key: str, message: str):
+    if not BOT_TOKEN:
+        return
+    user = get_user_by_key(client_key)
+    tg_id = user.get("tg_user_id") if user else None
+    if not tg_id:
+        return
+    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+    payload = urllib.parse.urlencode({
+        "chat_id": int(tg_id),
+        "text": f"🔔 GHOSTCORE\n\n{message}",
+    }).encode("utf-8")
+    try:
+        req = urllib.request.Request(url, data=payload, method="POST")
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            resp.read()
+    except Exception as e:
+        print(f"⚠️ Не удалось отправить уведомление в бот: {e}")
 
 
 def init_banners_table():
@@ -69,6 +93,10 @@ def init_banners_table():
         db.execute("ALTER TABLE access_keys ADD COLUMN admin_note TEXT NOT NULL DEFAULT ''")
     if "is_paid" not in cols:
         db.execute("ALTER TABLE access_keys ADD COLUMN is_paid INTEGER NOT NULL DEFAULT 0")
+    if "tg_user_id" not in cols:
+        db.execute("ALTER TABLE access_keys ADD COLUMN tg_user_id INTEGER")
+    if "tg_username" not in cols:
+        db.execute("ALTER TABLE access_keys ADD COLUMN tg_username TEXT NOT NULL DEFAULT ''")
     db.commit()
     db.close()
 
@@ -1522,6 +1550,7 @@ async def check_qr_auth(request: Request, sid: str):
         db.commit()
         db.close()
 
+        notify_user_sync(client_key, f"Подключён новый TG-аккаунт по QR: {phone_str}")
         return RedirectResponse(url="/cabinet?message=QR-код успешно сканирован!", status_code=303)
     except asyncio.TimeoutError:
         return RedirectResponse(url="/cabinet/start-qr", status_code=303)
@@ -1593,6 +1622,7 @@ async def verify_client_code(request: Request, acc_id: int = Form(...), code: st
         db.commit()
         db.close()
 
+        notify_user_sync(client_key, f"TG-аккаунт {acc['phone']} успешно авторизован в кабинете.")
         return RedirectResponse(url="/cabinet?message=Аккаунт успешно авторизован!", status_code=303)
     except Exception as e:
         await client.disconnect()
@@ -1724,12 +1754,13 @@ async def run_client_task(request: Request):
                     pass
 
     cursor.execute(
-        "INSERT INTO client_tasks (client_key, task_type, target_link, result_text) VALUES (?, ?, ?, ?)",
-        (client_key, task_type, "Мульти-база", res_text),
+        "INSERT INTO client_tasks (client_key, task_type, target_link, result_text, created_at) VALUES (?, ?, ?, ?, ?)",
+        (client_key, task_type, "Мульти-база", res_text, time.time()),
     )
     db.commit()
     db.close()
 
+    notify_user_sync(client_key, f"Задача ({task_type}): {res_text}")
     return RedirectResponse(url="/cabinet?message=Задача обработана!", status_code=303)
 
 
