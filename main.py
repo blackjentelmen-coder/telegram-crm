@@ -6,6 +6,7 @@ import io
 import base64
 import uuid
 import time
+import sqlite3
 from typing import List
 from fastapi import FastAPI, Form, Request, Response, UploadFile, File, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse, RedirectResponse, FileResponse, JSONResponse
@@ -61,6 +62,11 @@ def init_banners_table():
         )
         """
     )
+    cols = [row["name"] for row in db.execute("PRAGMA table_info(access_keys)").fetchall()]
+    if "is_muted" not in cols:
+        db.execute("ALTER TABLE access_keys ADD COLUMN is_muted INTEGER NOT NULL DEFAULT 0")
+    if "admin_note" not in cols:
+        db.execute("ALTER TABLE access_keys ADD COLUMN admin_note TEXT NOT NULL DEFAULT ''")
     db.commit()
     db.close()
 
@@ -80,6 +86,7 @@ def get_active_home_banners() -> List[dict]:
         """
     ).fetchall()
     db.close()
+
     result = []
     for r in rows:
         item = dict(r)
@@ -160,13 +167,26 @@ chat_manager = ChatConnectionManager()
 def get_authorized_client(client_key: str):
     if not client_key:
         return None
+    init_banners_table()
     db = get_db()
-    row = db.execute(
-        "SELECT id, key_code, client_name, status_text, status FROM access_keys WHERE key_code = ?",
-        (client_key.strip().upper(),),
-    ).fetchone()
+    try:
+        row = db.execute(
+            "SELECT id, key_code, client_name, status_text, status, is_muted FROM access_keys WHERE key_code = ?",
+            (client_key.strip().upper(),),
+        ).fetchone()
+    except sqlite3.OperationalError:
+        row = db.execute(
+            "SELECT id, key_code, client_name, status_text, status FROM access_keys WHERE key_code = ?",
+            (client_key.strip().upper(),),
+        ).fetchone()
     db.close()
-    return dict(row) if row else None
+    if not row:
+        return None
+    data = dict(row)
+    if (data.get("status") or "").lower() == "banned":
+        return None
+    data["is_muted"] = int(data.get("is_muted") or 0)
+    return data
 
 
 def is_admin_authenticated(request: Request) -> bool:
@@ -179,7 +199,7 @@ def is_admin_authenticated(request: Request) -> bool:
     ]
     for name in cookie_names:
         val = request.cookies.get(name)
-        if val and val.strip().lower() in ("1", "true", "yes", "admin", "ok"):
+        if val and val.strip().lower() in ("1", "true", "yes", "admin", "ok", "ghostcore_admin_authenticated"):
             return True
         if val and len(val.strip()) > 0 and name != "client_session":
             return True
@@ -198,6 +218,7 @@ def api_home_data(request: Request):
         "banners": banners,
         "messages": messages,
         "authenticated": bool(user),
+        "is_muted": bool(user and user.get("is_muted")),
     })
 
 
@@ -285,9 +306,51 @@ async def admin_delete_banner(request: Request, banner_id: int = Form(...)):
     return RedirectResponse(url="/admin?message=Баннер+удалён", status_code=303)
 
 
+@app.post("/admin/banner/disable")
+def admin_disable_legacy_banner(request: Request):
+    if not is_admin_authenticated(request):
+        return JSONResponse({"error": "Admin access required"}, status_code=403)
+
+    current_banner = get_banner() or {}
+    update_banner_db(
+        is_active=False,
+        title=current_banner.get("title") or "GHOSTCORE",
+        text=current_banner.get("text") or "",
+        url=current_banner.get("url") or "",
+        image_url=current_banner.get("image_url") or "",
+    )
+    return RedirectResponse(url="/admin?message=Старый+баннер+отключён", status_code=303)
+
+
+@app.post("/admin/banner/clear-legacy")
+def admin_clear_legacy_banner(request: Request):
+    if not is_admin_authenticated(request):
+        return JSONResponse({"error": "Admin access required"}, status_code=403)
+
+    current_banner = get_banner() or {}
+    old_img = current_banner.get("image_url", "")
+    if old_img.startswith("/static/banners/"):
+        old_path = os.path.join("static", "banners", os.path.basename(old_img))
+        if os.path.exists(old_path):
+            try:
+                os.remove(old_path)
+            except Exception:
+                pass
+    update_banner_db(
+        is_active=False,
+        title="",
+        text="",
+        url="",
+        image_url="",
+    )
+    return RedirectResponse(url="/admin?message=Старый+баннер+очищен", status_code=303)
+
+
 @app.get("/api/profile")
 def api_get_profile(request: Request):
     client_key = request.cookies.get("client_session")
+    if not get_authorized_client(client_key):
+        return JSONResponse({"authenticated": False}, status_code=401)
     profile = get_client_profile(client_key)
     if not profile:
         return JSONResponse({"authenticated": False}, status_code=401)
@@ -297,6 +360,8 @@ def api_get_profile(request: Request):
 @app.post("/cabinet/update-profile")
 async def update_profile_route(request: Request):
     client_key = request.cookies.get("client_session")
+    if not get_authorized_client(client_key):
+        return RedirectResponse(url="/?error=Доступ+заблокирован", status_code=303)
     profile = get_client_profile(client_key)
     if not profile:
         return RedirectResponse(url="/", status_code=303)
@@ -325,6 +390,23 @@ async def websocket_chat(websocket: WebSocket):
             raw_text = str(data.get("text", "")).strip()
             if not raw_text:
                 continue
+
+            fresh_user = get_authorized_client(client_key)
+            if not fresh_user:
+                await websocket.send_json({
+                    "type": "system",
+                    "text": "Ваш аккаунт заблокирован.",
+                })
+                await websocket.close(code=1008)
+                return
+
+            if int(fresh_user.get("is_muted") or 0) == 1:
+                await websocket.send_json({
+                    "type": "system",
+                    "text": "Вы замучены в чате администратором.",
+                })
+                continue
+
             saved = add_chat_message(author=author, text=raw_text[:1000])
             await chat_manager.broadcast({
                 "type": "message",
@@ -356,7 +438,7 @@ async def admin_update_banner(
     new_image_url = save_uploaded_banner_image(image) if (image and image.filename) else None
 
     if new_image_url:
-        current_banner = get_banner()
+        current_banner = get_banner() or {}
         old_img = current_banner.get("image_url", "")
         if old_img.startswith("/static/banners/"):
             old_path = os.path.join("static", "banners", os.path.basename(old_img))
@@ -403,7 +485,7 @@ def admin_clear_banner_image(request: Request):
     if not is_admin_authenticated(request):
         return JSONResponse({"error": "Admin access required"}, status_code=403)
 
-    current_banner = get_banner()
+    current_banner = get_banner() or {}
     old_img = current_banner.get("image_url", "")
     if old_img.startswith("/static/banners/"):
         old_path = os.path.join("static", "banners", os.path.basename(old_img))
@@ -413,10 +495,10 @@ def admin_clear_banner_image(request: Request):
             except Exception:
                 pass
     update_banner_db(
-        is_active=current_banner["active"],
-        title=current_banner["title"],
-        text=current_banner["text"],
-        url=current_banner["url"],
+        is_active=current_banner.get("active", False),
+        title=current_banner.get("title", ""),
+        text=current_banner.get("text", ""),
+        url=current_banner.get("url", ""),
         image_url="",
     )
     return RedirectResponse(url="/admin?message=Картинка+удалена", status_code=303)
@@ -467,6 +549,7 @@ def home_page(request: Request, error: str = None):
         """
         <section class="frame-card">
             <div class="frame-title">ACTIVE TRANSMISSIONS</div>
+            <div id="chat-notice" class="chat-notice" style="display:none;"></div>
             <div id="chat-box" class="tx-list"></div>
             <form id="chat-form" class="tx-form">
                 <input id="chat-input" type="text" class="field-box" placeholder="Type your message..." autocomplete="off" required>
@@ -497,6 +580,13 @@ def home_page(request: Request, error: str = None):
         const chatBox = document.getElementById("chat-box");
         const chatForm = document.getElementById("chat-form");
         const chatInput = document.getElementById("chat-input");
+        const chatNotice = document.getElementById("chat-notice");
+
+        function showChatNotice(msg) {
+            if (!chatNotice) return;
+            chatNotice.textContent = msg;
+            chatNotice.style.display = msg ? "block" : "none";
+        }
 
         function appendMessage(id, author, text) {
             if (!chatBox) return;
@@ -523,6 +613,11 @@ def home_page(request: Request, error: str = None):
                 if (!res.ok) return;
                 const data = await res.json();
                 startBannerRotation(Array.isArray(data.banners) ? data.banners : (data.banner ? [data.banner] : []));
+                if (data.is_muted) {
+                    showChatNotice("Вы замучены в чате администратором.");
+                } else {
+                    showChatNotice("");
+                }
                 if (data.authenticated && chatBox && Array.isArray(data.messages)) {
                     chatBox.innerHTML = "";
                     data.messages.forEach(m => appendMessage(m.id, m.author, m.text));
@@ -538,6 +633,10 @@ def home_page(request: Request, error: str = None):
         ws.onmessage = (event) => {
             try {
                 const payload = JSON.parse(event.data);
+                if (payload.type === "system") {
+                    showChatNotice(payload.text || "Ограничение чата.");
+                    return;
+                }
                 if (payload.type === "clear") { if (chatBox) chatBox.innerHTML = ""; return; }
                 if (payload.type === "delete") {
                     const target = chatBox ? chatBox.querySelector(`[data-msg-id="${payload.id}"]`) : null;
@@ -812,6 +911,15 @@ def home_page(request: Request, error: str = None):
                 text-transform: uppercase;
                 color: var(--text-main);
                 margin-bottom: 10px;
+            }}
+            .chat-notice {{
+                font-size: 11px;
+                color: #fcd34d;
+                background: rgba(245, 158, 11, 0.14);
+                border: 1px solid rgba(245, 158, 11, 0.4);
+                border-radius: 7px;
+                padding: 6px 9px;
+                margin-bottom: 8px;
             }}
             .tx-list {{
                 min-height: 180px;
@@ -1216,6 +1324,9 @@ def login_client(response: Response, key_code: str = Form(...)):
     if not key_row:
         return RedirectResponse(url="/?error=Неверный ключ доступа", status_code=303)
 
+    if (key_row["status"] or "").lower() == "banned":
+        return RedirectResponse(url="/?error=Аккаунт заблокирован", status_code=303)
+
     if key_row["status"] == "free":
         db = get_db()
         cursor = db.cursor()
@@ -1234,14 +1345,11 @@ def client_cabinet(request: Request):
     if not client_key:
         return RedirectResponse(url="/", status_code=303)
 
-    db = get_db()
-    cursor = db.cursor()
-    cursor.execute("SELECT * FROM access_keys WHERE key_code = ?", (client_key,))
-    key_row = cursor.fetchone()
-    db.close()
-
+    key_row = get_authorized_client(client_key)
     if not key_row:
-        return RedirectResponse(url="/logout-client", status_code=303)
+        resp = RedirectResponse(url="/?error=Аккаунт заблокирован", status_code=303)
+        resp.delete_cookie(key="client_session")
+        return resp
 
     return FileResponse("index.html")
 
@@ -1249,7 +1357,7 @@ def client_cabinet(request: Request):
 @app.get("/cabinet/start-qr", response_class=HTMLResponse)
 async def start_qr_auth(request: Request):
     client_key = request.cookies.get("client_session")
-    if not client_key:
+    if not get_authorized_client(client_key):
         return RedirectResponse(url="/", status_code=303)
 
     client = TelegramClient(StringSession(), API_ID, API_HASH)
@@ -1375,7 +1483,7 @@ async def start_qr_auth(request: Request):
 @app.get("/cabinet/check-qr", response_class=HTMLResponse)
 async def check_qr_auth(request: Request, sid: str):
     client_key = request.cookies.get("client_session")
-    if not client_key or sid not in qr_sessions:
+    if not get_authorized_client(client_key) or sid not in qr_sessions:
         return RedirectResponse(url="/cabinet", status_code=303)
 
     data = qr_sessions[sid]
@@ -1411,7 +1519,7 @@ async def check_qr_auth(request: Request, sid: str):
 @app.post("/cabinet/add-account")
 async def add_client_account(request: Request, phone: str = Form(...)):
     client_key = request.cookies.get("client_session")
-    if not client_key:
+    if not get_authorized_client(client_key):
         return RedirectResponse(url="/", status_code=303)
 
     clean_phone = phone.strip()
@@ -1442,7 +1550,7 @@ async def add_client_account(request: Request, phone: str = Form(...)):
 @app.post("/cabinet/verify-code")
 async def verify_client_code(request: Request, acc_id: int = Form(...), code: str = Form(...)):
     client_key = request.cookies.get("client_session")
-    if not client_key:
+    if not get_authorized_client(client_key):
         return RedirectResponse(url="/", status_code=303)
 
     db = get_db()
@@ -1480,7 +1588,7 @@ async def verify_client_code(request: Request, acc_id: int = Form(...), code: st
 @app.post("/cabinet/delete-account")
 def delete_client_account(request: Request, acc_id: int = Form(...)):
     client_key = request.cookies.get("client_session")
-    if not client_key:
+    if not get_authorized_client(client_key):
         return RedirectResponse(url="/", status_code=303)
 
     db = get_db()
@@ -1495,7 +1603,7 @@ def delete_client_account(request: Request, acc_id: int = Form(...)):
 @app.post("/cabinet/run-task")
 async def run_client_task(request: Request):
     client_key = request.cookies.get("client_session")
-    if not client_key:
+    if not get_authorized_client(client_key):
         return RedirectResponse(url="/", status_code=303)
 
     form = await request.form()
