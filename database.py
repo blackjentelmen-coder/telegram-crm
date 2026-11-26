@@ -65,7 +65,8 @@ def init_db():
             phone_code_hash TEXT,
             status TEXT DEFAULT 'Ожидает код',
             status_reason TEXT NOT NULL DEFAULT '',
-            checked_at TEXT NOT NULL DEFAULT ''
+            checked_at TEXT NOT NULL DEFAULT '',
+            proxy_str TEXT NOT NULL DEFAULT ''
         )
     """)
 
@@ -74,6 +75,8 @@ def init_db():
         cursor.execute("ALTER TABLE client_tg_accounts ADD COLUMN status_reason TEXT NOT NULL DEFAULT ''")
     if "checked_at" not in acc_cols:
         cursor.execute("ALTER TABLE client_tg_accounts ADD COLUMN checked_at TEXT NOT NULL DEFAULT ''")
+    if "proxy_str" not in acc_cols:
+        cursor.execute("ALTER TABLE client_tg_accounts ADD COLUMN proxy_str TEXT NOT NULL DEFAULT ''")
 
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS client_tasks (
@@ -569,7 +572,7 @@ def get_active_client_tg_accounts(client_key: str) -> list:
     conn = get_db()
     rows = conn.execute(
         """
-        SELECT id, client_key, phone, session_string, status, status_reason, checked_at
+        SELECT id, client_key, phone, session_string, status, status_reason, checked_at, proxy_str
         FROM client_tg_accounts
         WHERE client_key = ? AND status = ?
         ORDER BY id DESC
