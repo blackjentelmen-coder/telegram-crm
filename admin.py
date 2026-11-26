@@ -281,19 +281,30 @@ def render_admin_login(error: str = "") -> str:
 
             .admin-tabs {{
                 display: grid;
-                grid-template-columns: repeat(4, 1fr);
-                gap: 6px;
+                grid-template-columns: repeat(2, 1fr);
+                gap: 8px;
                 margin-bottom: 12px;
                 background: #0c070a;
                 border: 1px solid var(--border);
                 border-radius: 10px;
-                padding: 6px;
+                padding: 8px;
+            }}
+            @media (min-width: 640px) {{
+                .admin-tabs {{
+                    grid-template-columns: repeat(4, 1fr);
+                }}
             }}
             .tab-btn {{
-                padding: 8px 6px;
-                border-radius: 7px;
-                border: 1px solid transparent;
-                background: transparent;
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                justify-content: center;
+                gap: 4px;
+                min-height: 48px;
+                padding: 8px 8px;
+                border-radius: 8px;
+                border: 1px solid #2b1017;
+                background: #12090d;
                 color: var(--muted);
                 font-size: 11px;
                 font-weight: 800;
@@ -301,19 +312,26 @@ def render_admin_login(error: str = "") -> str:
                 letter-spacing: 0.4px;
                 cursor: pointer;
                 text-align: center;
-                line-height: 1.25;
+                line-height: 1.2;
             }}
             .tab-btn.active {{
-                background: rgba(255, 30, 66, 0.16);
+                background: rgba(255, 30, 66, 0.18);
                 border-color: var(--red);
                 color: var(--text);
                 box-shadow: 0 0 10px var(--red-soft);
             }}
             .tab-cnt {{
-                display: block;
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+                min-width: 22px;
+                padding: 1px 7px;
+                border-radius: 999px;
+                background: rgba(255, 255, 255, 0.06);
                 font-size: 10px;
-                opacity: 0.8;
-                margin-top: 2px;
+                font-weight: 800;
+                color: #ffd6de;
+                line-height: 1.3;
             }}
             .admin-pane {{ display: none; }}
             .admin-pane.active {{ display: block; }}
@@ -1252,6 +1270,48 @@ def admin_dashboard(request: Request, message: str = "", q: str = ""):
                 </section>
             </div>
         </div>
+
+        <script>
+            function switchAdminTab(tabName) {{
+                const valid = ["users", "banners", "chat", "vip"];
+                const target = valid.includes(tabName) ? tabName : "users";
+                document.querySelectorAll(".tab-btn").forEach(btn => {{
+                    btn.classList.toggle("active", btn.dataset.tab === target);
+                }});
+                document.querySelectorAll(".admin-pane").forEach(pane => {{
+                    pane.classList.toggle("active", pane.dataset.pane === target);
+                }});
+                try {{
+                    localStorage.setItem("ghostcore_admin_tab", target);
+                }} catch (e) {{}}
+                if (history.replaceState) {{
+                    const url = new URL(window.location.href);
+                    url.hash = "tab-" + target;
+                    history.replaceState(null, "", url.toString());
+                }}
+            }}
+
+            (function initAdminTab() {{
+                const params = new URLSearchParams(window.location.search);
+                const hash = (window.location.hash || "").replace(/^#/, "");
+                let initial = "users";
+                if (params.get("q")) {{
+                    initial = "users";
+                }} else if (hash.startsWith("tab-")) {{
+                    initial = hash.slice(4);
+                }} else if (hash === "paid-users") {{
+                    initial = "vip";
+                }} else if (hash === "users") {{
+                    initial = "users";
+                }} else {{
+                    try {{
+                        const saved = localStorage.getItem("ghostcore_admin_tab");
+                        if (saved) initial = saved;
+                    }} catch (e) {{}}
+                }}
+                switchAdminTab(initial);
+            }})();
+        </script>
     </body>
     </html>
     """
