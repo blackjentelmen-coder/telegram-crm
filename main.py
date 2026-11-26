@@ -83,6 +83,64 @@ app.include_router(admin.router)
 
 qr_sessions = {}
 
+import socks as _socks
+
+
+def parse_proxy_tuple(raw_proxy: str):
+    txt = (raw_proxy or "").strip()
+    if not txt:
+        return None
+    if "://" not in txt and txt.count(":") == 3:
+        parts = txt.split(":")
+        host, port, user, pwd = parts[0].strip(), parts[1].strip(), parts[2].strip(), parts[3].strip()
+        txt = f"socks5://{urllib.parse.quote(user)}:{urllib.parse.quote(pwd)}@{host}:{port}"
+    elif "://" not in txt and txt.count(":") == 1:
+        host, port = txt.split(":", 1)
+        txt = f"socks5://{host.strip()}:{port.strip()}"
+
+    parsed = urllib.parse.urlparse(txt)
+    scheme = (parsed.scheme or "socks5").lower()
+    host = parsed.hostname
+    port = parsed.port
+    if not host or not port:
+        return None
+
+    if scheme in ("socks5", "socks5h"):
+        ptype = _socks.SOCKS5
+    elif scheme in ("socks4", "socks4a"):
+        ptype = _socks.SOCKS4
+    elif scheme in ("http", "https"):
+        ptype = _socks.HTTP
+    else:
+        ptype = _socks.SOCKS5
+
+    user = urllib.parse.unquote(parsed.username) if parsed.username else None
+    pwd = urllib.parse.unquote(parsed.password) if parsed.password else None
+    return (ptype, host, int(port), True, user, pwd)
+
+
+def format_proxy_display(raw_proxy: str) -> str:
+    txt = (raw_proxy or "").strip()
+    if not txt:
+        return ""
+    if "://" not in txt and txt.count(":") == 3:
+        parts = txt.split(":")
+        return f"socks5://{parts[0].strip()}:{parts[1].strip()}"
+    parsed = urllib.parse.urlparse(txt if "://" in txt else f"socks5://{txt}")
+    scheme = (parsed.scheme or "socks5").lower()
+    if parsed.hostname and parsed.port:
+        return f"{scheme}://{parsed.hostname}:{parsed.port}"
+    return txt[:48]
+
+
+def get_account_proxy_tuple(acc_row: dict):
+    enc = (acc_row or {}).get("proxy_str") or ""
+    if not enc:
+        return None
+    plain = decrypt_secret(enc)
+    return parse_proxy_tuple(plain)
+
+
 
 def get_session_key_from_request(request: Request) -> str | None:
     raw = request.cookies.get(CLIENT_COOKIE_NAME)
@@ -131,7 +189,8 @@ async def check_and_sync_account(acc_row: dict, client_key: str) -> dict:
         log_warn(f"Аккаунт {phone}: сессия пуста -> {ACCOUNT_STATUS_SESSION_LOST}")
         return {**acc_row, "status": ACCOUNT_STATUS_SESSION_LOST, "status_reason": "Пустая строка сессии", "client": None}
 
-    client = TelegramClient(StringSession(session_str), API_ID, API_HASH)
+    proxy_cfg = get_account_proxy_tuple(acc_row)
+    client = TelegramClient(StringSession(session_str), API_ID, API_HASH, proxy=proxy_cfg)
     try:
         await client.connect()
         if not await client.is_user_authorized():
@@ -475,7 +534,7 @@ def api_get_accounts(request: Request):
     db = get_db()
     rows = db.execute(
         """
-        SELECT id, phone, status, status_reason, checked_at
+        SELECT id, phone, status, status_reason, checked_at, proxy_str
         FROM client_tg_accounts
         WHERE client_key = ?
         ORDER BY id DESC
@@ -483,7 +542,14 @@ def api_get_accounts(request: Request):
         (client_key,),
     ).fetchall()
     db.close()
-    return JSONResponse({"authenticated": True, "accounts": [dict(r) for r in rows]})
+    out = []
+    for r in rows:
+        item = dict(r)
+        raw_p = decrypt_secret(item.pop("proxy_str", "") or "")
+        item["proxy_display"] = format_proxy_display(raw_p)
+        item["proxy_raw"] = raw_p
+        out.append(item)
+    return JSONResponse({"authenticated": True, "accounts": out})
 
 
 @app.get("/api/spam-campaign")
@@ -1988,7 +2054,7 @@ async def check_qr_auth(request: Request, sid: str):
     qr = data["qr"]
 
     try:
-        await qr.wait(timeout=3)
+        await qr.wait(timeout=8)
         me = await client.get_me()
         phone_str = f"+{me.phone}" if me and me.phone else "QR-Аккаунт"
 
@@ -2100,6 +2166,33 @@ async def verify_client_code(request: Request, acc_id: int = Form(...), code: st
         await client.disconnect()
         log_err(f"Ошибка входа по коду {acc['phone']}: {e}")
         return RedirectResponse(url=f"/cabinet?message=Ошибка авторизации: {str(e)}", status_code=303)
+
+
+@app.post("/cabinet/set-account-proxy")
+def set_account_proxy(request: Request, acc_id: int = Form(...), proxy_url: str = Form("")):
+    client_key = get_session_key_from_request(request)
+    if not get_authorized_client(client_key):
+        return RedirectResponse(url="/", status_code=303)
+
+    clean_proxy = (proxy_url or "").strip()
+    if clean_proxy and parse_proxy_tuple(clean_proxy) is None:
+        err = urllib.parse.quote("Неверный формат прокси. Пример: socks5://user:pass@ip:port или ip:port:user:pass")
+        return RedirectResponse(url=f"/cabinet?message={err}#accounts", status_code=303)
+
+    enc_proxy = encrypt_secret(clean_proxy) if clean_proxy else ""
+    db = get_db()
+    cur = db.execute(
+        "UPDATE client_tg_accounts SET proxy_str = ? WHERE id = ? AND client_key = ?",
+        (enc_proxy, acc_id, client_key),
+    )
+    db.commit()
+    db.close()
+
+    if cur.rowcount == 0:
+        return RedirectResponse(url="/cabinet?message=Аккаунт+не+найден#accounts", status_code=303)
+
+    msg = urllib.parse.quote("Прокси сохранён!" if clean_proxy else "Прокси отключён")
+    return RedirectResponse(url=f"/cabinet?message={msg}#accounts", status_code=303)
 
 
 @app.post("/cabinet/delete-account")
@@ -2308,3 +2401,4 @@ def logout_client():
     resp = RedirectResponse(url="/", status_code=303)
     resp.delete_cookie(key=CLIENT_COOKIE_NAME, path="/")
     return resp
+
