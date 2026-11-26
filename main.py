@@ -1,5 +1,4 @@
 import os
-import shutil
 import asyncio
 import qrcode
 import io
@@ -11,7 +10,7 @@ import urllib.request
 import urllib.parse
 from typing import List
 from fastapi import FastAPI, Form, Request, Response, UploadFile, File, WebSocket, WebSocketDisconnect
-from fastapi.responses import HTMLResponse, RedirectResponse, FileResponse, JSONResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from telethon import TelegramClient
 from telethon.sessions import StringSession
@@ -50,16 +49,29 @@ from database import (
     ACCOUNT_STATUS_SESSION_LOST,
 )
 from ghost_logger import log_ok, log_warn, log_err
+from security import (
+    encrypt_secret,
+    decrypt_secret,
+    sign_value,
+    verify_signed_value,
+    check_rate_limit,
+    record_failed_attempt,
+    clear_failed_attempts,
+    get_client_ip,
+    validate_image_bytes,
+)
 import admin
 
 import spammer
 import inviter
 import parser
 
-API_ID = 38977487
-API_HASH = "a6afb062a4c36f6d7b2cb87d27385672"
+API_ID = int(os.getenv("GHOSTCORE_TG_API_ID", "38977487"))
+API_HASH = os.getenv("GHOSTCORE_TG_API_HASH", "a6afb062a4c36f6d7b2cb87d27385672")
 BOT_TOKEN = os.getenv("GHOSTCORE_BOT_TOKEN", "")
 SECRET_PATH = admin.SECRET_ADMIN_PATH
+CLIENT_COOKIE_NAME = "client_session"
+IS_HTTPS = os.getenv("GHOSTCORE_HTTPS", "0").lower() in ("1", "true", "yes")
 
 os.makedirs("static/banners", exist_ok=True)
 
@@ -70,6 +82,18 @@ init_db()
 app.include_router(admin.router)
 
 qr_sessions = {}
+
+
+def get_session_key_from_request(request: Request) -> str | None:
+    raw = request.cookies.get(CLIENT_COOKIE_NAME)
+    verified = verify_signed_value(raw)
+    return verified.strip().upper() if verified else None
+
+
+def get_session_key_from_ws(websocket: WebSocket) -> str | None:
+    raw = websocket.cookies.get(CLIENT_COOKIE_NAME)
+    verified = verify_signed_value(raw)
+    return verified.strip().upper() if verified else None
 
 
 def classify_tg_error(err: Exception):
@@ -100,7 +124,7 @@ def classify_tg_error(err: Exception):
 async def check_and_sync_account(acc_row: dict, client_key: str) -> dict:
     acc_id = acc_row["id"]
     phone = acc_row.get("phone") or f"#{acc_id}"
-    session_str = acc_row.get("session_string") or ""
+    session_str = decrypt_secret(acc_row.get("session_string") or "")
 
     if not session_str:
         set_tg_account_status(acc_id, ACCOUNT_STATUS_SESSION_LOST, "Пустая строка сессии")
@@ -239,16 +263,17 @@ def get_all_home_banners() -> List[dict]:
     return [dict(r) for r in rows]
 
 
-def save_uploaded_banner_image(image: UploadFile) -> str:
+async def save_uploaded_banner_image(image: UploadFile) -> str:
     if not image or not image.filename:
         return ""
-    ext = os.path.splitext(image.filename)[1].lower()
-    if ext not in [".jpg", ".jpeg", ".png", ".gif", ".webp"]:
+    raw_bytes = await image.read(3 * 1024 * 1024 + 1)
+    ext = validate_image_bytes(raw_bytes, max_bytes=3 * 1024 * 1024)
+    if not ext:
         return ""
     filename = f"{uuid.uuid4().hex}{ext}"
     filepath = os.path.join("static", "banners", filename)
     with open(filepath, "wb") as buffer:
-        shutil.copyfileobj(image.file, buffer)
+        buffer.write(raw_bytes)
     return f"/static/banners/{filename}"
 
 
@@ -278,7 +303,7 @@ class ChatConnectionManager:
 chat_manager = ChatConnectionManager()
 
 
-def get_authorized_client(client_key: str):
+def get_authorized_client(client_key: str | None):
     if not client_key:
         return None
     init_banners_table()
@@ -310,7 +335,7 @@ def is_admin_authenticated(request: Request) -> bool:
 
 @app.get("/api/home-data")
 def api_home_data(request: Request):
-    client_key = request.cookies.get("client_session")
+    client_key = get_session_key_from_request(request)
     user = get_authorized_client(client_key)
     messages = get_recent_chat_messages(limit=50) if user else []
     banners = get_active_home_banners()
@@ -327,7 +352,7 @@ def api_home_data(request: Request):
 
 @app.get("/api/accounts")
 def api_get_accounts(request: Request):
-    client_key = request.cookies.get("client_session")
+    client_key = get_session_key_from_request(request)
     user = get_authorized_client(client_key)
     if not user:
         return JSONResponse({"authenticated": False, "accounts": []}, status_code=401)
@@ -339,7 +364,7 @@ def api_get_accounts(request: Request):
         WHERE client_key = ?
         ORDER BY id DESC
         """,
-        (client_key.strip().upper(),),
+        (client_key,),
     ).fetchall()
     db.close()
     return JSONResponse({"authenticated": True, "accounts": [dict(r) for r in rows]})
@@ -347,7 +372,7 @@ def api_get_accounts(request: Request):
 
 @app.get("/api/spam-campaign")
 def api_get_spam_campaign(request: Request):
-    client_key = request.cookies.get("client_session")
+    client_key = get_session_key_from_request(request)
     if not get_authorized_client(client_key):
         return JSONResponse({"campaign": None}, status_code=401)
     return JSONResponse({"campaign": get_latest_spam_campaign(client_key)})
@@ -355,14 +380,14 @@ def api_get_spam_campaign(request: Request):
 
 @app.post("/cabinet/check-account")
 async def check_single_account(request: Request, acc_id: int = Form(...)):
-    client_key = request.cookies.get("client_session")
+    client_key = get_session_key_from_request(request)
     if not get_authorized_client(client_key):
         return RedirectResponse(url="/", status_code=303)
 
     db = get_db()
     row = db.execute(
         "SELECT * FROM client_tg_accounts WHERE id = ? AND client_key = ?",
-        (acc_id, client_key.strip().upper()),
+        (acc_id, client_key),
     ).fetchone()
     db.close()
 
@@ -384,7 +409,7 @@ async def check_single_account(request: Request, acc_id: int = Form(...)):
 
 @app.get("/api/notifications")
 def api_get_notifications(request: Request):
-    client_key = request.cookies.get("client_session")
+    client_key = get_session_key_from_request(request)
     if not get_authorized_client(client_key):
         return JSONResponse({"notifications": []}, status_code=401)
     return JSONResponse({"notifications": get_site_notifications(client_key)})
@@ -392,7 +417,7 @@ def api_get_notifications(request: Request):
 
 @app.post("/api/notifications/read")
 def api_read_notifications(request: Request):
-    client_key = request.cookies.get("client_session")
+    client_key = get_session_key_from_request(request)
     if not get_authorized_client(client_key):
         return JSONResponse({"ok": False}, status_code=401)
     mark_notifications_read(client_key)
@@ -419,7 +444,7 @@ async def admin_add_banner(
     if not is_admin_authenticated(request):
         return JSONResponse({"error": "Admin access required"}, status_code=403)
 
-    image_url = save_uploaded_banner_image(image)
+    image_url = await save_uploaded_banner_image(image)
     clean_duration = max(2, min(int(duration_sec or 8), 3600))
     is_active = 1 if active in ("on", "1", "true", "yes") else 0
 
@@ -431,9 +456,9 @@ async def admin_add_banner(
         VALUES (?, ?, ?, ?, ?, ?, ?)
         """,
         (
-            title.strip() or "GHOSTCORE",
-            text.strip(),
-            url.strip(),
+            title.strip()[:80] or "GHOSTCORE",
+            text.strip()[:300],
+            url.strip()[:300],
             image_url,
             clean_duration,
             is_active,
@@ -525,7 +550,7 @@ def admin_clear_legacy_banner(request: Request):
 
 @app.get("/api/profile")
 def api_get_profile(request: Request):
-    client_key = request.cookies.get("client_session")
+    client_key = get_session_key_from_request(request)
     user = get_authorized_client(client_key)
     if not user:
         return JSONResponse({"authenticated": False}, status_code=401)
@@ -538,7 +563,7 @@ def api_get_profile(request: Request):
 
 @app.post("/cabinet/update-profile")
 async def update_profile_route(request: Request):
-    client_key = request.cookies.get("client_session")
+    client_key = get_session_key_from_request(request)
     if not get_authorized_client(client_key):
         return RedirectResponse(url="/?error=Доступ+заблокирован", status_code=303)
     profile = get_client_profile(client_key)
@@ -546,14 +571,14 @@ async def update_profile_route(request: Request):
         return RedirectResponse(url="/", status_code=303)
 
     form = await request.form()
-    new_name = str(form.get("client_name", "")).strip()
-    new_status = str(form.get("status_text", ""))
+    new_name = str(form.get("client_name", "")).strip()[:40]
+    new_status = str(form.get("status_text", ""))[:80]
 
     if new_name:
         db = get_db()
         dup = db.execute(
             "SELECT id FROM access_keys WHERE LOWER(TRIM(client_name)) = LOWER(?) AND key_code != ?",
-            (new_name, client_key.strip().upper()),
+            (new_name, client_key),
         ).fetchone()
         db.close()
         if dup:
@@ -565,7 +590,7 @@ async def update_profile_route(request: Request):
 
 @app.websocket("/ws/chat")
 async def websocket_chat(websocket: WebSocket):
-    client_key = websocket.cookies.get("client_session")
+    client_key = get_session_key_from_ws(websocket)
     user = get_authorized_client(client_key)
     if not user:
         await websocket.close(code=1008)
@@ -626,7 +651,7 @@ async def admin_update_banner(
         return JSONResponse({"error": "Admin access required"}, status_code=403)
 
     is_active = (active == "on")
-    new_image_url = save_uploaded_banner_image(image) if (image and image.filename) else None
+    new_image_url = await save_uploaded_banner_image(image) if (image and image.filename) else None
 
     if new_image_url:
         current_banner = get_banner() or {}
@@ -641,9 +666,9 @@ async def admin_update_banner(
 
     update_banner_db(
         is_active=is_active,
-        title=title.strip() or "Промо",
-        text=text.strip(),
-        url=url.strip(),
+        title=title.strip()[:80] or "Промо",
+        text=text.strip()[:300],
+        url=url.strip()[:300],
         image_url=new_image_url,
     )
 
@@ -657,9 +682,9 @@ async def admin_update_banner(
             VALUES (?, ?, ?, ?, ?, 1, ?)
             """,
             (
-                title.strip() or "Промо",
-                text.strip(),
-                url.strip(),
+                title.strip()[:80] or "Промо",
+                text.strip()[:300],
+                url.strip()[:300],
                 new_image_url or "",
                 clean_duration,
                 time.time(),
@@ -712,13 +737,13 @@ async def admin_delete_chat_message(request: Request, msg_id: int = Form(...)):
 
     delete_chat_message_db(msg_id)
     await chat_manager.broadcast({"type": "delete", "id": msg_id})
-    return RedirectResponse(url=f"{SECRET_PATH}?message=Сообщение+удалено", status_code=303)
+    return RedirectResponse(url=f"{SECRET_ADMIN_PATH}?message=Сообщение+удалено", status_code=303)
 
 
 @app.get("/", response_class=HTMLResponse)
 def home_page(request: Request, error: str = None):
     err_html = f'<div class="err-box">{error}</div>' if error else ""
-    client_key = request.cookies.get("client_session")
+    client_key = get_session_key_from_request(request)
     user = get_authorized_client(client_key)
     is_auth = bool(user)
 
@@ -1371,8 +1396,13 @@ def home_page(request: Request, error: str = None):
 
 
 @app.post("/register", response_class=HTMLResponse)
-def register_client(response: Response, client_name: str = Form(...)):
-    clean_name = client_name.strip()
+def register_client(request: Request, client_name: str = Form(...)):
+    ip = get_client_ip(request.headers, request.client.host if request.client else None)
+    allowed, wait_sec = check_rate_limit(f"register:{ip}", max_attempts=5, window_sec=120, block_sec=300)
+    if not allowed:
+        return RedirectResponse(url=f"/?error=Слишком+много+запросов.+Ждите+{wait_sec}+сек", status_code=303)
+
+    clean_name = client_name.strip()[:40]
     if not clean_name:
         return RedirectResponse(url="/?error=Введите имя", status_code=303)
 
@@ -1385,6 +1415,7 @@ def register_client(response: Response, client_name: str = Form(...)):
     ).fetchone()
     if existing:
         db.close()
+        record_failed_attempt(f"register:{ip}")
         return RedirectResponse(url="/?error=Пользователь с таким именем уже существует", status_code=303)
 
     new_key = str(uuid.uuid4())[:8].upper()
@@ -1394,6 +1425,7 @@ def register_client(response: Response, client_name: str = Form(...)):
     )
     db.commit()
     db.close()
+    clear_failed_attempts(f"register:{ip}")
 
     html = f"""
     <!DOCTYPE html>
@@ -1508,12 +1540,25 @@ def register_client(response: Response, client_name: str = Form(...)):
     </html>
     """
     resp = HTMLResponse(content=html)
-    resp.set_cookie(key="client_session", value=new_key, httponly=True)
+    resp.set_cookie(
+        key=CLIENT_COOKIE_NAME,
+        value=sign_value(new_key),
+        httponly=True,
+        samesite="lax",
+        secure=IS_HTTPS,
+        path="/",
+    )
     return resp
 
 
 @app.post("/login")
-def login_client(response: Response, key_code: str = Form(...)):
+def login_client(request: Request, key_code: str = Form(...)):
+    ip = get_client_ip(request.headers, request.client.host if request.client else None)
+    bucket = f"client_login:{ip}"
+    allowed, wait_sec = check_rate_limit(bucket)
+    if not allowed:
+        return RedirectResponse(url=f"/?error=Слишком+много+попыток.+Ждите+{wait_sec}+сек", status_code=303)
+
     clean_key = key_code.strip().upper()
     db = get_db()
     cursor = db.cursor()
@@ -1522,9 +1567,11 @@ def login_client(response: Response, key_code: str = Form(...)):
     db.close()
 
     if not key_row:
+        record_failed_attempt(bucket)
         return RedirectResponse(url="/?error=Неверный ключ доступа", status_code=303)
 
     if (key_row["status"] or "").lower() == "banned":
+        record_failed_attempt(bucket)
         return RedirectResponse(url="/?error=Аккаунт заблокирован", status_code=303)
 
     if key_row["status"] == "free":
@@ -1534,29 +1581,38 @@ def login_client(response: Response, key_code: str = Form(...)):
         db.commit()
         db.close()
 
+    clear_failed_attempts(bucket)
     resp = RedirectResponse(url="/cabinet", status_code=303)
-    resp.set_cookie(key="client_session", value=clean_key, httponly=True)
+    resp.set_cookie(
+        key=CLIENT_COOKIE_NAME,
+        value=sign_value(clean_key),
+        httponly=True,
+        samesite="lax",
+        secure=IS_HTTPS,
+        path="/",
+    )
     return resp
 
 
 @app.get("/cabinet", response_class=HTMLResponse)
 def client_cabinet(request: Request):
-    client_key = request.cookies.get("client_session")
+    client_key = get_session_key_from_request(request)
     if not client_key:
         return RedirectResponse(url="/", status_code=303)
 
     key_row = get_authorized_client(client_key)
     if not key_row:
         resp = RedirectResponse(url="/?error=Аккаунт заблокирован", status_code=303)
-        resp.delete_cookie(key="client_session")
+        resp.delete_cookie(key=CLIENT_COOKIE_NAME, path="/")
         return resp
 
-    return FileResponse("index.html")
+    with open("index.html", "r", encoding="utf-8") as f:
+        return HTMLResponse(content=f.read())
 
 
 @app.get("/cabinet/start-qr", response_class=HTMLResponse)
 async def start_qr_auth(request: Request):
-    client_key = request.cookies.get("client_session")
+    client_key = get_session_key_from_request(request)
     if not get_authorized_client(client_key):
         return RedirectResponse(url="/", status_code=303)
 
@@ -1566,7 +1622,7 @@ async def start_qr_auth(request: Request):
     try:
         qr = await client.qr_login()
         session_id = uuid.uuid4().hex
-        qr_sessions[session_id] = {"client": client, "qr": qr}
+        qr_sessions[session_id] = {"client": client, "qr": qr, "owner_key": client_key}
 
         img = qrcode.make(qr.url)
         buffered = io.BytesIO()
@@ -1682,11 +1738,14 @@ async def start_qr_auth(request: Request):
 
 @app.get("/cabinet/check-qr", response_class=HTMLResponse)
 async def check_qr_auth(request: Request, sid: str):
-    client_key = request.cookies.get("client_session")
+    client_key = get_session_key_from_request(request)
     if not get_authorized_client(client_key) or sid not in qr_sessions:
         return RedirectResponse(url="/cabinet", status_code=303)
 
     data = qr_sessions[sid]
+    if data.get("owner_key") != client_key:
+        return RedirectResponse(url="/cabinet", status_code=303)
+
     client = data["client"]
     qr = data["qr"]
 
@@ -1695,7 +1754,7 @@ async def check_qr_auth(request: Request, sid: str):
         me = await client.get_me()
         phone_str = f"+{me.phone}" if me and me.phone else "QR-Аккаунт"
 
-        final_session_str = client.session.save()
+        final_session_str = encrypt_secret(client.session.save())
         await client.disconnect()
         del qr_sessions[sid]
 
@@ -1724,7 +1783,7 @@ async def check_qr_auth(request: Request, sid: str):
 
 @app.post("/cabinet/add-account")
 async def add_client_account(request: Request, phone: str = Form(...)):
-    client_key = request.cookies.get("client_session")
+    client_key = get_session_key_from_request(request)
     if not get_authorized_client(client_key):
         return RedirectResponse(url="/", status_code=303)
 
@@ -1734,8 +1793,8 @@ async def add_client_account(request: Request, phone: str = Form(...)):
 
     try:
         sent = await client.send_code_request(clean_phone)
-        phone_code_hash = sent.phone_code_hash
-        session_str = client.session.save()
+        phone_code_hash = encrypt_secret(sent.phone_code_hash)
+        session_str = encrypt_secret(client.session.save())
         await client.disconnect()
 
         db = get_db()
@@ -1760,7 +1819,7 @@ async def add_client_account(request: Request, phone: str = Form(...)):
 
 @app.post("/cabinet/verify-code")
 async def verify_client_code(request: Request, acc_id: int = Form(...), code: str = Form(...)):
-    client_key = request.cookies.get("client_session")
+    client_key = get_session_key_from_request(request)
     if not get_authorized_client(client_key):
         return RedirectResponse(url="/", status_code=303)
 
@@ -1773,12 +1832,14 @@ async def verify_client_code(request: Request, acc_id: int = Form(...), code: st
     if not acc:
         return RedirectResponse(url="/cabinet?message=Аккаунт не найден", status_code=303)
 
-    client = TelegramClient(StringSession(acc["session_string"]), API_ID, API_HASH)
+    plain_session = decrypt_secret(acc["session_string"] or "")
+    plain_hash = decrypt_secret(acc["phone_code_hash"] or "")
+    client = TelegramClient(StringSession(plain_session), API_ID, API_HASH)
     await client.connect()
 
     try:
-        await client.sign_in(phone=acc["phone"], code=code.strip(), phone_code_hash=acc["phone_code_hash"])
-        final_session_str = client.session.save()
+        await client.sign_in(phone=acc["phone"], code=code.strip(), phone_code_hash=plain_hash)
+        final_session_str = encrypt_secret(client.session.save())
         await client.disconnect()
 
         db = get_db()
@@ -1786,7 +1847,7 @@ async def verify_client_code(request: Request, acc_id: int = Form(...), code: st
         cursor.execute(
             """
             UPDATE client_tg_accounts
-            SET session_string = ?, status = ?, status_reason = 'Сессия активна', checked_at = ?
+            SET session_string = ?, phone_code_hash = '', status = ?, status_reason = 'Сессия активна', checked_at = ?
             WHERE id = ?
             """,
             (final_session_str, ACCOUNT_STATUS_ACTIVE, time.strftime("%Y-%m-%d %H:%M:%S"), acc_id),
@@ -1805,7 +1866,7 @@ async def verify_client_code(request: Request, acc_id: int = Form(...), code: st
 
 @app.post("/cabinet/delete-account")
 def delete_client_account(request: Request, acc_id: int = Form(...)):
-    client_key = request.cookies.get("client_session")
+    client_key = get_session_key_from_request(request)
     if not get_authorized_client(client_key):
         return RedirectResponse(url="/", status_code=303)
 
@@ -1820,7 +1881,7 @@ def delete_client_account(request: Request, acc_id: int = Form(...)):
 
 @app.post("/cabinet/run-task")
 async def run_client_task(request: Request):
-    client_key = request.cookies.get("client_session")
+    client_key = get_session_key_from_request(request)
     user = get_authorized_client(client_key)
     if not user:
         return RedirectResponse(url="/", status_code=303)
@@ -2007,5 +2068,5 @@ async def run_client_task(request: Request):
 @app.get("/logout-client")
 def logout_client():
     resp = RedirectResponse(url="/", status_code=303)
-    resp.delete_cookie(key="client_session")
+    resp.delete_cookie(key=CLIENT_COOKIE_NAME, path="/")
     return resp
