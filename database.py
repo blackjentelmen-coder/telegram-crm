@@ -31,6 +31,8 @@ def init_db():
             is_muted INTEGER NOT NULL DEFAULT 0,
             admin_note TEXT NOT NULL DEFAULT '',
             is_paid INTEGER NOT NULL DEFAULT 0,
+            badge_label TEXT NOT NULL DEFAULT '',
+            badge_style TEXT NOT NULL DEFAULT 'vip',
             tg_user_id INTEGER,
             tg_username TEXT NOT NULL DEFAULT ''
         )
@@ -45,6 +47,10 @@ def init_db():
         cursor.execute("ALTER TABLE access_keys ADD COLUMN admin_note TEXT NOT NULL DEFAULT ''")
     if "is_paid" not in cols:
         cursor.execute("ALTER TABLE access_keys ADD COLUMN is_paid INTEGER NOT NULL DEFAULT 0")
+    if "badge_label" not in cols:
+        cursor.execute("ALTER TABLE access_keys ADD COLUMN badge_label TEXT NOT NULL DEFAULT ''")
+    if "badge_style" not in cols:
+        cursor.execute("ALTER TABLE access_keys ADD COLUMN badge_style TEXT NOT NULL DEFAULT 'vip'")
     if "tg_user_id" not in cols:
         cursor.execute("ALTER TABLE access_keys ADD COLUMN tg_user_id INTEGER")
     if "tg_username" not in cols:
@@ -387,7 +393,7 @@ def get_client_profile(key_code: str):
     row = conn.execute(
         """
         SELECT id, key_code, status, client_name, status_text, note,
-               is_muted, admin_note, is_paid, tg_user_id, tg_username
+               is_muted, admin_note, is_paid, badge_label, badge_style, tg_user_id, tg_username
         FROM access_keys
         WHERE key_code = ?
         """,
@@ -512,7 +518,7 @@ def link_tg_to_key(key_code: str, tg_user_id: int, tg_username: str = "") -> dic
     clean_key = (key_code or "").strip().upper()
     conn = get_db()
     row = conn.execute(
-        "SELECT id, key_code, client_name, status, is_paid FROM access_keys WHERE key_code = ?",
+        "SELECT id, key_code, client_name, status, is_paid, badge_label, badge_style FROM access_keys WHERE key_code = ?",
         (clean_key,),
     ).fetchone()
     if not row:
@@ -535,7 +541,7 @@ def get_user_by_tg_id(tg_user_id: int):
     init_db()
     conn = get_db()
     row = conn.execute(
-        "SELECT id, key_code, client_name, status, is_paid, tg_user_id FROM access_keys WHERE tg_user_id = ?",
+        "SELECT id, key_code, client_name, status, is_paid, badge_label, badge_style, tg_user_id FROM access_keys WHERE tg_user_id = ?",
         (int(tg_user_id),),
     ).fetchone()
     conn.close()
@@ -552,7 +558,7 @@ def get_user_by_key(key_code: str):
     clean_key = (key_code or "").strip().upper()
     conn = get_db()
     row = conn.execute(
-        "SELECT id, key_code, client_name, status, is_paid, tg_user_id FROM access_keys WHERE key_code = ?",
+        "SELECT id, key_code, client_name, status, is_paid, badge_label, badge_style, tg_user_id FROM access_keys WHERE key_code = ?",
         (clean_key,),
     ).fetchone()
     conn.close()
@@ -572,3 +578,24 @@ def get_active_client_tg_accounts(client_key: str) -> list:
     ).fetchall()
     conn.close()
     return [dict(r) for r in rows]
+
+
+ALLOWED_BADGE_STYLES = {"vip", "staff", "mod", "tester", "pro", "alert"}
+
+
+def normalize_badge_style(style: str) -> str:
+    s = (style or "vip").strip().lower()
+    return s if s in ALLOWED_BADGE_STYLES else "vip"
+
+
+def set_user_badge(user_id: int, badge_label: str, badge_style: str = "vip"):
+    init_db()
+    clean_label = (badge_label or "").strip()[:24]
+    clean_style = normalize_badge_style(badge_style)
+    conn = get_db()
+    conn.execute(
+        "UPDATE access_keys SET badge_label = ?, badge_style = ? WHERE id = ?",
+        (clean_label, clean_style, int(user_id)),
+    )
+    conn.commit()
+    conn.close()
