@@ -278,6 +278,45 @@ def render_admin_login(error: str = "") -> str:
                 font-size: 12px;
                 text-decoration: none;
             }}
+
+            .admin-tabs {{
+                display: grid;
+                grid-template-columns: repeat(4, 1fr);
+                gap: 6px;
+                margin-bottom: 12px;
+                background: #0c070a;
+                border: 1px solid var(--border);
+                border-radius: 10px;
+                padding: 6px;
+            }}
+            .tab-btn {{
+                padding: 8px 6px;
+                border-radius: 7px;
+                border: 1px solid transparent;
+                background: transparent;
+                color: var(--muted);
+                font-size: 11px;
+                font-weight: 800;
+                text-transform: uppercase;
+                letter-spacing: 0.4px;
+                cursor: pointer;
+                text-align: center;
+                line-height: 1.25;
+            }}
+            .tab-btn.active {{
+                background: rgba(255, 30, 66, 0.16);
+                border-color: var(--red);
+                color: var(--text);
+                box-shadow: 0 0 10px var(--red-soft);
+            }}
+            .tab-cnt {{
+                display: block;
+                font-size: 10px;
+                opacity: 0.8;
+                margin-top: 2px;
+            }}
+            .admin-pane {{ display: none; }}
+            .admin-pane.active {{ display: block; }}
         </style>
     </head>
     <body>
@@ -290,7 +329,50 @@ def render_admin_login(error: str = "") -> str:
             <button type="submit" class="btn">Войти в панель</button>
             <a href="/" class="back">← На главную</a>
         </form>
+
+        <script>
+            function switchAdminTab(tabName) {{
+                const valid = ["users", "banners", "chat", "vip"];
+                const target = valid.includes(tabName) ? tabName : "users";
+                document.querySelectorAll(".tab-btn").forEach(btn => {{
+                    btn.classList.toggle("active", btn.dataset.tab === target);
+                }});
+                document.querySelectorAll(".admin-pane").forEach(pane => {{
+                    pane.classList.toggle("active", pane.dataset.pane === target);
+                }});
+                try {{
+                    localStorage.setItem("ghostcore_admin_tab", target);
+                }} catch (e) {{}}
+                if (history.replaceState) {{
+                    const url = new URL(window.location.href);
+                    url.hash = "tab-" + target;
+                    history.replaceState(null, "", url.toString());
+                }}
+            }}
+
+            (function initAdminTab() {{
+                const params = new URLSearchParams(window.location.search);
+                const hash = (window.location.hash || "").replace(/^#/, "");
+                let initial = "users";
+                if (params.get("q")) {{
+                    initial = "users";
+                }} else if (hash.startsWith("tab-")) {{
+                    initial = hash.slice(4);
+                }} else if (hash === "paid-users") {{
+                    initial = "vip";
+                }} else if (hash === "users") {{
+                    initial = "users";
+                }} else {{
+                    try {{
+                        const saved = localStorage.getItem("ghostcore_admin_tab");
+                        if (saved) initial = saved;
+                    }} catch (e) {{}}
+                }}
+                switchAdminTab(initial);
+            }})();
+        </script>
     </body>
+
     </html>
     """
 
@@ -1069,83 +1151,106 @@ def admin_dashboard(request: Request, message: str = "", q: str = ""):
 
             {msg_html}
 
-            {pulse_card_html}
+            <div id="admin-tabs" class="admin-tabs" role="tablist">
+                <button type="button" class="tab-btn active" data-tab="users" onclick="switchAdminTab('users')">
+                    Пользователи<span class="tab-cnt">{len(users)}</span>
+                </button>
+                <button type="button" class="tab-btn" data-tab="banners" onclick="switchAdminTab('banners')">
+                    Баннеры и пульс<span class="tab-cnt">{len(banners)}</span>
+                </button>
+                <button type="button" class="tab-btn" data-tab="chat" onclick="switchAdminTab('chat')">
+                    Чат<span class="tab-cnt">{len(messages)}</span>
+                </button>
+                <button type="button" class="tab-btn" data-tab="vip" onclick="switchAdminTab('vip')">
+                    VIP<span class="tab-cnt">{len(paid_users)}</span>
+                </button>
+            </div>
 
-            <section id="paid-users" class="card">
-                <div class="card-title">Оплатившие / VIP пользователи ({len(paid_users)})</div>
-                {paid_html}
-            </section>
+            <div class="admin-pane active" data-pane="users">
+                <section id="users" class="card">
+                    <div class="card-title">Пользователи и ключи ({len(users)})</div>
 
-            <section id="users" class="card">
-                <div class="card-title">Пользователи и ключи ({len(users)})</div>
-
-                <form action="{SECRET_ADMIN_PATH}" method="GET" class="search-row">
-                    <input type="text" name="q" class="field-mini" value="{q}" placeholder="Поиск по имени или ключу...">
-                    <button type="submit" class="btn-sm btn-ghost">Найти</button>
-                    <a href="{SECRET_ADMIN_PATH}#users" class="btn-sm btn-ghost">Сброс</a>
-                </form>
-
-                <form action="{SECRET_ADMIN_PATH}/users/create" method="POST" style="margin-bottom:10px;padding-bottom:10px;border-bottom:1px solid #260d14;">
-                    <label class="lbl">Выдать новый ключ (уникальное имя)</label>
-                    <div class="search-row" style="margin-bottom:6px;">
-                        <input type="text" name="client_name" class="field-mini" placeholder="Имя клиента" required>
-                        <button type="submit" class="btn-sm btn-danger">+ Ключ</button>
-                    </div>
-                    <label class="check-line" style="margin:0;">
-                        <input type="checkbox" name="is_paid">
-                        <span>Сразу выдать оплаченный VIP-доступ</span>
-                    </label>
-                </form>
-
-                {users_html}
-            </section>
-
-            <section class="card">
-                <div class="card-title">Добавить баннер в ротацию</div>
-                <form action="{SECRET_ADMIN_PATH}/banners/add" method="POST" enctype="multipart/form-data">
-                    <label class="lbl">Заголовок</label>
-                    <input type="text" name="title" class="field" placeholder="Например: VIP ДОСТУП" required>
-
-                    <label class="lbl">Текст баннера</label>
-                    <input type="text" name="text" class="field" placeholder="Короткое описание акции или новости">
-
-                    <label class="lbl">Ссылка (необязательно)</label>
-                    <input type="text" name="url" class="field" placeholder="https://t.me/...">
-
-                    <div class="row-2">
-                        <div>
-                            <label class="lbl">Длительность (сек)</label>
-                            <input type="number" name="duration_sec" class="field" value="8" min="2" max="3600">
-                        </div>
-                        <div>
-                            <label class="lbl">Картинка (до 3 МБ)</label>
-                            <input type="file" name="image" class="field" accept="image/*">
-                        </div>
-                    </div>
-
-                    <label class="check-line">
-                        <input type="checkbox" name="active" checked>
-                        <span>Показывать баннер в ротации</span>
-                    </label>
-
-                    <button type="submit" class="btn-main">Добавить баннер</button>
-                </form>
-            </section>
-
-            <section class="card">
-                <div class="card-title">Активные и сохранённые баннеры ({len(banners)})</div>
-                {banner_rows_html}
-            </section>
-
-            <section class="card">
-                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
-                    <div class="card-title" style="margin-bottom:0;">Чат сайта ({len(messages)})</div>
-                    <form action="{SECRET_ADMIN_PATH}/chat/clear" method="POST" style="margin:0;">
-                        <button type="submit" class="btn-sm btn-danger">Очистить чат</button>
+                    <form action="{SECRET_ADMIN_PATH}" method="GET" class="search-row">
+                        <input type="text" name="q" class="field-mini" value="{q}" placeholder="Поиск по имени или ключу...">
+                        <button type="submit" class="btn-sm btn-ghost">Найти</button>
+                        <a href="{SECRET_ADMIN_PATH}#tab-users" class="btn-sm btn-ghost">Сброс</a>
                     </form>
-                </div>
-                {chat_rows_html}
-            </section>
+
+                    <form action="{SECRET_ADMIN_PATH}/users/create" method="POST" style="margin-bottom:10px;padding-bottom:10px;border-bottom:1px solid #260d14;">
+                        <label class="lbl">Выдать новый ключ (уникальное имя)</label>
+                        <div class="search-row" style="margin-bottom:6px;">
+                            <input type="text" name="client_name" class="field-mini" placeholder="Имя клиента" required>
+                            <button type="submit" class="btn-sm btn-danger">+ Ключ</button>
+                        </div>
+                        <label class="check-line" style="margin:0;">
+                            <input type="checkbox" name="is_paid">
+                            <span>Сразу выдать оплаченный VIP-доступ</span>
+                        </label>
+                    </form>
+
+                    {users_html}
+                </section>
+            </div>
+
+            <div class="admin-pane" data-pane="banners">
+                {pulse_card_html}
+
+                <section class="card">
+                    <div class="card-title">Добавить баннер в ротацию</div>
+                    <form action="{SECRET_ADMIN_PATH}/banners/add" method="POST" enctype="multipart/form-data">
+                        <label class="lbl">Заголовок</label>
+                        <input type="text" name="title" class="field" placeholder="Например: VIP ДОСТУП" required>
+
+                        <label class="lbl">Текст баннера</label>
+                        <input type="text" name="text" class="field" placeholder="Короткое описание акции или новости">
+
+                        <label class="lbl">Ссылка (необязательно)</label>
+                        <input type="text" name="url" class="field" placeholder="https://t.me/...">
+
+                        <div class="row-2">
+                            <div>
+                                <label class="lbl">Длительность (сек)</label>
+                                <input type="number" name="duration_sec" class="field" value="8" min="2" max="3600">
+                            </div>
+                            <div>
+                                <label class="lbl">Картинка (до 3 МБ)</label>
+                                <input type="file" name="image" class="field" accept="image/*">
+                            </div>
+                        </div>
+
+                        <label class="check-line">
+                            <input type="checkbox" name="active" checked>
+                            <span>Показывать баннер в ротации</span>
+                        </label>
+
+                        <button type="submit" class="btn-main">Добавить баннер</button>
+                    </form>
+                </section>
+
+                <section class="card">
+                    <div class="card-title">Активные и сохранённые баннеры ({len(banners)})</div>
+                    {banner_rows_html}
+                </section>
+            </div>
+
+            <div class="admin-pane" data-pane="chat">
+                <section class="card">
+                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+                        <div class="card-title" style="margin-bottom:0;">Чат сайта ({len(messages)})</div>
+                        <form action="{SECRET_ADMIN_PATH}/chat/clear" method="POST" style="margin:0;">
+                            <button type="submit" class="btn-sm btn-danger">Очистить чат</button>
+                        </form>
+                    </div>
+                    {chat_rows_html}
+                </section>
+            </div>
+
+            <div class="admin-pane" data-pane="vip">
+                <section id="paid-users" class="card">
+                    <div class="card-title">Оплатившие / VIP пользователи ({len(paid_users)})</div>
+                    {paid_html}
+                </section>
+            </div>
         </div>
     </body>
     </html>
