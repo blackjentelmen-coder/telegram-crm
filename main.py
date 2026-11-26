@@ -215,6 +215,10 @@ def init_banners_table():
         db.execute("ALTER TABLE access_keys ADD COLUMN admin_note TEXT NOT NULL DEFAULT ''")
     if "is_paid" not in cols:
         db.execute("ALTER TABLE access_keys ADD COLUMN is_paid INTEGER NOT NULL DEFAULT 0")
+    if "badge_label" not in cols:
+        db.execute("ALTER TABLE access_keys ADD COLUMN badge_label TEXT NOT NULL DEFAULT ''")
+    if "badge_style" not in cols:
+        db.execute("ALTER TABLE access_keys ADD COLUMN badge_style TEXT NOT NULL DEFAULT 'vip'")
     if "tg_user_id" not in cols:
         db.execute("ALTER TABLE access_keys ADD COLUMN tg_user_id INTEGER")
     if "tg_username" not in cols:
@@ -381,7 +385,7 @@ def get_authorized_client(client_key: str | None):
     db = get_db()
     try:
         row = db.execute(
-            "SELECT id, key_code, client_name, status_text, status, is_muted, is_paid FROM access_keys WHERE key_code = ?",
+            "SELECT id, key_code, client_name, status_text, status, is_muted, is_paid, badge_label, badge_style FROM access_keys WHERE key_code = ?",
             (client_key.strip().upper(),),
         ).fetchone()
     except sqlite3.OperationalError:
@@ -397,6 +401,8 @@ def get_authorized_client(client_key: str | None):
         return None
     data["is_muted"] = int(data.get("is_muted") or 0)
     data["is_paid"] = int(data.get("is_paid") or 0)
+    data["badge_label"] = (data.get("badge_label") or "").strip()
+    data["badge_style"] = (data.get("badge_style") or "vip").lower()
     return data
 
 
@@ -404,11 +410,49 @@ def is_admin_authenticated(request: Request) -> bool:
     return admin.is_admin_logged_in(request)
 
 
+
+
+def get_author_badge_map() -> dict:
+    db = get_db()
+    mapping = {}
+    try:
+        rows = db.execute(
+            "SELECT client_name, key_code, badge_label, badge_style FROM access_keys WHERE COALESCE(TRIM(badge_label), '') != ''"
+        ).fetchall()
+        for r in rows:
+            info = {
+                "badge_label": (r["badge_label"] or "").strip(),
+                "badge_style": (r["badge_style"] or "vip").lower(),
+            }
+            cname = (r["client_name"] or "").strip().lower()
+            kcode = (r["key_code"] or "").strip().lower()
+            if cname:
+                mapping[cname] = info
+            if kcode:
+                mapping[kcode] = info
+    except sqlite3.OperationalError:
+        pass
+    finally:
+        db.close()
+    return mapping
+
+
 @app.get("/api/home-data")
 def api_home_data(request: Request):
     client_key = get_session_key_from_request(request)
     user = get_authorized_client(client_key)
     messages = get_recent_chat_messages(limit=50) if user else []
+    if user and messages:
+        bmap = get_author_badge_map()
+        enriched = []
+        for m in messages:
+            item = dict(m)
+            binfo = bmap.get((item.get("author") or "").strip().lower())
+            if binfo:
+                item["badge_label"] = binfo["badge_label"]
+                item["badge_style"] = binfo["badge_style"]
+            enriched.append(item)
+        messages = enriched
     banners = get_active_home_banners()
     first_banner = banners[0] if banners else None
     return JSONResponse({
@@ -695,12 +739,16 @@ async def websocket_chat(websocket: WebSocket):
                 continue
 
             saved = add_chat_message(author=author, text=raw_text[:1000])
+            b_label = (fresh_user.get("badge_label") or "").strip()
+            b_style = (fresh_user.get("badge_style") or "vip").lower()
             await chat_manager.broadcast({
                 "type": "message",
                 "id": saved["id"],
                 "author": saved["author"],
                 "text": saved["text"],
                 "created_at": saved["created_at"],
+                "badge_label": b_label,
+                "badge_style": b_style,
             })
     except WebSocketDisconnect:
         chat_manager.disconnect(websocket)
@@ -876,11 +924,19 @@ def home_page(request: Request, error: str = None):
             chatNotice.style.display = msg ? "block" : "none";
         }
 
-        function appendMessage(id, author, text) {
+        function appendMessage(id, author, text, badgeLabel, badgeStyle) {
             if (!chatBox) return;
             const item = document.createElement("div");
             item.className = "tx-item";
             if (id !== undefined && id !== null) item.dataset.msgId = String(id);
+
+            if (badgeLabel) {
+                const badge = document.createElement("span");
+                const st = (badgeStyle || "vip").toLowerCase();
+                badge.className = "chat-badge chat-badge-" + st;
+                badge.textContent = badgeLabel;
+                item.appendChild(badge);
+            }
 
             const nick = document.createElement("span");
             nick.className = "tx-nick";
@@ -909,7 +965,7 @@ def home_page(request: Request, error: str = None):
                 }
                 if (data.authenticated && chatBox && Array.isArray(data.messages)) {
                     chatBox.innerHTML = "";
-                    data.messages.forEach(m => appendMessage(m.id, m.author, m.text));
+                    data.messages.forEach(m => appendMessage(m.id, m.author, m.text, m.badge_label, m.badge_style));
                 }
             } catch (e) {
                 console.error(e);
@@ -932,7 +988,7 @@ def home_page(request: Request, error: str = None):
                     if (target) target.remove();
                     return;
                 }
-                appendMessage(payload.id, payload.author, payload.text);
+                appendMessage(payload.id, payload.author, payload.text, payload.badge_label, payload.badge_style);
             } catch (e) {
                 appendMessage(null, "System", event.data);
             }
@@ -1294,6 +1350,23 @@ def home_page(request: Request, error: str = None):
                 font-weight: 700;
                 margin-right: 5px;
             }}
+            .chat-badge {{
+                display: inline-block;
+                font-size: 9px;
+                font-weight: 800;
+                letter-spacing: 0.6px;
+                text-transform: uppercase;
+                padding: 1px 6px;
+                border-radius: 999px;
+                margin-right: 6px;
+                vertical-align: middle;
+            }}
+            .chat-badge-vip {{ background: rgba(255, 30, 66, 0.18); color: #ff8fa3; border: 1px solid rgba(255, 30, 66, 0.5); }}
+            .chat-badge-staff {{ background: rgba(34, 197, 94, 0.18); color: #86efac; border: 1px solid rgba(34, 197, 94, 0.5); }}
+            .chat-badge-mod {{ background: rgba(56, 189, 248, 0.18); color: #7dd3fc; border: 1px solid rgba(56, 189, 248, 0.5); }}
+            .chat-badge-tester {{ background: rgba(168, 85, 247, 0.18); color: #d8b4fe; border: 1px solid rgba(168, 85, 247, 0.5); }}
+            .chat-badge-pro {{ background: rgba(245, 158, 11, 0.18); color: #fcd34d; border: 1px solid rgba(245, 158, 11, 0.5); }}
+            .chat-badge-alert {{ background: rgba(239, 68, 68, 0.22); color: #fca5a5; border: 1px solid rgba(239, 68, 68, 0.6); }}
             .tx-form {{
                 display: flex;
                 gap: 8px;
