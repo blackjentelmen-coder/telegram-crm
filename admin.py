@@ -113,31 +113,25 @@ def fetch_users_with_messages(search_query: str = "") -> list:
     ensure_admin_schema()
     db = get_db()
     q = (search_query or "").strip().lower()
+    all_rows = [
+        dict(r)
+        for r in db.execute(
+            """
+            SELECT id, key_code, client_name, status, status_text, is_muted, admin_note, is_paid, badge_label, badge_style
+            FROM access_keys
+            ORDER BY id DESC
+            """
+        ).fetchall()
+    ]
     if q:
-        like_q = f"%{q}%"
         users = [
-            dict(r)
-            for r in db.execute(
-                """
-                SELECT id, key_code, client_name, status, status_text, is_muted, admin_note, is_paid, badge_label, badge_style
-                FROM access_keys
-                WHERE LOWER(COALESCE(client_name, '')) LIKE ? OR LOWER(COALESCE(key_code, '')) LIKE ?
-                ORDER BY id DESC
-                """,
-                (like_q, like_q),
-            ).fetchall()
+            u
+            for u in all_rows
+            if q in (u.get("client_name") or "").strip().lower()
+            or q in (u.get("key_code") or "").strip().lower()
         ]
     else:
-        users = [
-            dict(r)
-            for r in db.execute(
-                """
-                SELECT id, key_code, client_name, status, status_text, is_muted, admin_note, is_paid, badge_label, badge_style
-                FROM access_keys
-                ORDER BY id DESC
-                """
-            ).fetchall()
-        ]
+        users = all_rows
 
     all_msgs = []
     try:
