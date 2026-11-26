@@ -15,6 +15,9 @@ ADMIN_PASSWORD = os.getenv("GHOSTCORE_ADMIN_PASSWORD", "ghostcore123")
 ADMIN_COOKIE_NAME = "admin_session"
 ADMIN_COOKIE_VALUE = "ghostcore_admin_authenticated"
 
+RAW_SECRET_PATH = (os.getenv("GHOSTCORE_ADMIN_PATH", "ghost_sys_73m9q2x") or "ghost_sys_73m9q2x").strip().strip("/")
+SECRET_ADMIN_PATH = f"/{RAW_SECRET_PATH}" if RAW_SECRET_PATH else "/ghost_sys_73m9q2x"
+
 
 def is_admin_logged_in(request: Request) -> bool:
     return request.cookies.get(ADMIN_COOKIE_NAME) == ADMIN_COOKIE_VALUE
@@ -150,7 +153,7 @@ def render_admin_login(error: str = "") -> str:
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>GHOSTCORE | Вход в админ-панель</title>
+        <title>Вход в панель управления</title>
         <style>
             :root {{
                 --bg: #060609;
@@ -236,8 +239,8 @@ def render_admin_login(error: str = "") -> str:
         </style>
     </head>
     <body>
-        <form class="card" action="/admin/login" method="POST">
-            <h1>GHOSTCORE ADMIN</h1>
+        <form class="card" action="{SECRET_ADMIN_PATH}/login" method="POST">
+            <h1>CONTROL PANEL</h1>
             <p>Авторизация для управления пользователями, тарифами, баннерами и чатом</p>
             {err_block}
             <input type="text" name="login" class="field" placeholder="Логин" required>
@@ -250,30 +253,35 @@ def render_admin_login(error: str = "") -> str:
     """
 
 
-@router.post("/admin/login")
+@router.get("/admin", response_class=HTMLResponse)
+def legacy_admin_blocked():
+    return HTMLResponse(content="Not Found", status_code=404)
+
+
+@router.post(f"{SECRET_ADMIN_PATH}/login")
 def admin_login_submit(login: str = Form(...), password: str = Form(...)):
     if login.strip() == ADMIN_LOGIN and password == ADMIN_PASSWORD:
-        resp = RedirectResponse(url="/admin?message=Вход+выполнен", status_code=303)
-        resp.set_cookie(key=ADMIN_COOKIE_NAME, value=ADMIN_COOKIE_VALUE, httponly=True)
+        resp = RedirectResponse(url=f"{SECRET_ADMIN_PATH}?message=Вход+выполнен", status_code=303)
+        resp.set_cookie(key=ADMIN_COOKIE_NAME, value=ADMIN_COOKIE_VALUE, httponly=True, path="/")
         return resp
     return HTMLResponse(content=render_admin_login("Неверный логин или пароль"), status_code=401)
 
 
-@router.get("/admin/logout")
+@router.get(f"{SECRET_ADMIN_PATH}/logout")
 def admin_logout():
-    resp = RedirectResponse(url="/admin", status_code=303)
-    resp.delete_cookie(key=ADMIN_COOKIE_NAME)
+    resp = RedirectResponse(url=SECRET_ADMIN_PATH, status_code=303)
+    resp.delete_cookie(key=ADMIN_COOKIE_NAME, path="/")
     return resp
 
 
-@router.post("/admin/users/create")
+@router.post(f"{SECRET_ADMIN_PATH}/users/create")
 def admin_create_user(request: Request, client_name: str = Form(...), is_paid: str = Form("off")):
     if not is_admin_logged_in(request):
-        return RedirectResponse(url="/admin", status_code=303)
+        return RedirectResponse(url=SECRET_ADMIN_PATH, status_code=303)
     ensure_admin_schema()
     clean_name = client_name.strip()
     if not clean_name:
-        return RedirectResponse(url="/admin?message=Укажите+имя+пользователя#users", status_code=303)
+        return RedirectResponse(url=f"{SECRET_ADMIN_PATH}?message=Укажите+имя+пользователя#users", status_code=303)
 
     db = get_db()
     dup = db.execute(
@@ -282,7 +290,7 @@ def admin_create_user(request: Request, client_name: str = Form(...), is_paid: s
     ).fetchone()
     if dup:
         db.close()
-        return RedirectResponse(url="/admin?message=Ошибка:+имя+уже+занято#users", status_code=303)
+        return RedirectResponse(url=f"{SECRET_ADMIN_PATH}?message=Ошибка:+имя+уже+занято#users", status_code=303)
 
     new_key = str(_uuid.uuid4())[:8].upper()
     paid_flag = 1 if is_paid in ("on", "1", "true", "yes") else 0
@@ -292,13 +300,13 @@ def admin_create_user(request: Request, client_name: str = Form(...), is_paid: s
     )
     db.commit()
     db.close()
-    return RedirectResponse(url=f"/admin?message=Создан+ключ+{new_key}#users", status_code=303)
+    return RedirectResponse(url=f"{SECRET_ADMIN_PATH}?message=Создан+ключ+{new_key}#users", status_code=303)
 
 
-@router.post("/admin/users/toggle-paid")
+@router.post(f"{SECRET_ADMIN_PATH}/users/toggle-paid")
 def admin_toggle_user_paid(request: Request, user_id: int = Form(...)):
     if not is_admin_logged_in(request):
-        return RedirectResponse(url="/admin", status_code=303)
+        return RedirectResponse(url=SECRET_ADMIN_PATH, status_code=303)
     ensure_admin_schema()
     db = get_db()
     row = db.execute("SELECT is_paid FROM access_keys WHERE id = ?", (user_id,)).fetchone()
@@ -307,13 +315,13 @@ def admin_toggle_user_paid(request: Request, user_id: int = Form(...)):
         db.execute("UPDATE access_keys SET is_paid = ? WHERE id = ?", (next_paid, user_id))
         db.commit()
     db.close()
-    return RedirectResponse(url="/admin?message=Тариф+пользователя+обновлён#paid-users", status_code=303)
+    return RedirectResponse(url=f"{SECRET_ADMIN_PATH}?message=Тариф+пользователя+обновлён#paid-users", status_code=303)
 
 
-@router.post("/admin/users/toggle-ban")
+@router.post(f"{SECRET_ADMIN_PATH}/users/toggle-ban")
 def admin_toggle_user_ban(request: Request, user_id: int = Form(...)):
     if not is_admin_logged_in(request):
-        return RedirectResponse(url="/admin", status_code=303)
+        return RedirectResponse(url=SECRET_ADMIN_PATH, status_code=303)
     ensure_admin_schema()
     db = get_db()
     row = db.execute("SELECT status FROM access_keys WHERE id = ?", (user_id,)).fetchone()
@@ -322,13 +330,13 @@ def admin_toggle_user_ban(request: Request, user_id: int = Form(...)):
         db.execute("UPDATE access_keys SET status = ? WHERE id = ?", (next_status, user_id))
         db.commit()
     db.close()
-    return RedirectResponse(url="/admin?message=Статус+бана+обновлён#users", status_code=303)
+    return RedirectResponse(url=f"{SECRET_ADMIN_PATH}?message=Статус+бана+обновлён#users", status_code=303)
 
 
-@router.post("/admin/users/toggle-mute")
+@router.post(f"{SECRET_ADMIN_PATH}/users/toggle-mute")
 def admin_toggle_user_mute(request: Request, user_id: int = Form(...)):
     if not is_admin_logged_in(request):
-        return RedirectResponse(url="/admin", status_code=303)
+        return RedirectResponse(url=SECRET_ADMIN_PATH, status_code=303)
     ensure_admin_schema()
     db = get_db()
     row = db.execute("SELECT is_muted FROM access_keys WHERE id = ?", (user_id,)).fetchone()
@@ -337,13 +345,13 @@ def admin_toggle_user_mute(request: Request, user_id: int = Form(...)):
         db.execute("UPDATE access_keys SET is_muted = ? WHERE id = ?", (next_muted, user_id))
         db.commit()
     db.close()
-    return RedirectResponse(url="/admin?message=Статус+мута+в+чате+обновлён#users", status_code=303)
+    return RedirectResponse(url=f"{SECRET_ADMIN_PATH}?message=Статус+мута+в+чате+обновлён#users", status_code=303)
 
 
-@router.post("/admin/users/note")
+@router.post(f"{SECRET_ADMIN_PATH}/users/note")
 def admin_save_user_note(request: Request, user_id: int = Form(...), admin_note: str = Form("")):
     if not is_admin_logged_in(request):
-        return RedirectResponse(url="/admin", status_code=303)
+        return RedirectResponse(url=SECRET_ADMIN_PATH, status_code=303)
     ensure_admin_schema()
     db = get_db()
     db.execute(
@@ -352,19 +360,19 @@ def admin_save_user_note(request: Request, user_id: int = Form(...), admin_note:
     )
     db.commit()
     db.close()
-    return RedirectResponse(url="/admin?message=Заметка+сохранена#users", status_code=303)
+    return RedirectResponse(url=f"{SECRET_ADMIN_PATH}?message=Заметка+сохранена#users", status_code=303)
 
 
-@router.post("/admin/users/delete")
+@router.post(f"{SECRET_ADMIN_PATH}/users/delete")
 def admin_delete_user(request: Request, user_id: int = Form(...)):
     if not is_admin_logged_in(request):
-        return RedirectResponse(url="/admin", status_code=303)
+        return RedirectResponse(url=SECRET_ADMIN_PATH, status_code=303)
     ensure_admin_schema()
     db = get_db()
     db.execute("DELETE FROM access_keys WHERE id = ?", (user_id,))
     db.commit()
     db.close()
-    return RedirectResponse(url="/admin?message=Пользователь+удалён#users", status_code=303)
+    return RedirectResponse(url=f"{SECRET_ADMIN_PATH}?message=Пользователь+удалён#users", status_code=303)
 
 
 def _acc_badge_html(st: str) -> str:
@@ -438,31 +446,31 @@ def _render_user_card(u: dict) -> str:
         </div>
 
         <div class="u-actions">
-            <form action="/admin/users/toggle-paid" method="POST" style="margin:0;">
+            <form action="{SECRET_ADMIN_PATH}/users/toggle-paid" method="POST" style="margin:0;">
                 <input type="hidden" name="user_id" value="{u["id"]}">
                 <button type="submit" class="btn-sm btn-paid">
                     {"Снять VIP" if is_paid else "Перенести в VIP"}
                 </button>
             </form>
-            <form action="/admin/users/toggle-ban" method="POST" style="margin:0;">
+            <form action="{SECRET_ADMIN_PATH}/users/toggle-ban" method="POST" style="margin:0;">
                 <input type="hidden" name="user_id" value="{u["id"]}">
                 <button type="submit" class="btn-sm btn-danger">
                     {"Разбанить" if is_banned else "Забанить"}
                 </button>
             </form>
-            <form action="/admin/users/toggle-mute" method="POST" style="margin:0;">
+            <form action="{SECRET_ADMIN_PATH}/users/toggle-mute" method="POST" style="margin:0;">
                 <input type="hidden" name="user_id" value="{u["id"]}">
                 <button type="submit" class="btn-sm btn-warn">
                     {"Размутить" if is_muted else "Замутить в чате"}
                 </button>
             </form>
-            <form action="/admin/users/delete" method="POST" style="margin:0;">
+            <form action="{SECRET_ADMIN_PATH}/users/delete" method="POST" style="margin:0;">
                 <input type="hidden" name="user_id" value="{u["id"]}">
                 <button type="submit" class="btn-sm btn-ghost">Удалить</button>
             </form>
         </div>
 
-        <form action="/admin/users/note" method="POST" class="u-note-form">
+        <form action="{SECRET_ADMIN_PATH}/users/note" method="POST" class="u-note-form">
             <input type="hidden" name="user_id" value="{u["id"]}">
             <input type="text" name="admin_note" class="field-mini" value="{note_val}" placeholder="Заметка о пользователе...">
             <button type="submit" class="btn-sm btn-ghost">Сохранить</button>
@@ -481,7 +489,7 @@ def _render_user_card(u: dict) -> str:
     """
 
 
-@router.get("/admin", response_class=HTMLResponse)
+@router.get(SECRET_ADMIN_PATH, response_class=HTMLResponse)
 def admin_dashboard(request: Request, message: str = "", q: str = ""):
     if not is_admin_logged_in(request):
         return HTMLResponse(content=render_admin_login())
@@ -526,7 +534,7 @@ def admin_dashboard(request: Request, message: str = "", q: str = ""):
             banner_rows_html += f"""
             <div class="b-row">
                 <div class="b-head">
-                    <div class="b-title">{b.get("title") or "GHOSTCORE"}</div>
+                    <div class="b-title">{b.get("title") or "PANEL"}</div>
                     <div class="b-meta">
                         <span class="timer-chip">⏱ {dur} сек</span>
                         {active_badge}
@@ -536,11 +544,11 @@ def admin_dashboard(request: Request, message: str = "", q: str = ""):
                 <div class="b-text">{b.get("text") or ""}</div>
                 {url_line}
                 <div class="b-actions">
-                    <form action="/admin/banners/toggle" method="POST" style="margin:0;">
+                    <form action="{SECRET_ADMIN_PATH}/banners/toggle" method="POST" style="margin:0;">
                         <input type="hidden" name="banner_id" value="{b["id"]}">
                         <button type="submit" class="btn-sm btn-ghost">{toggle_label}</button>
                     </form>
-                    <form action="/admin/banners/delete" method="POST" style="margin:0;">
+                    <form action="{SECRET_ADMIN_PATH}/banners/delete" method="POST" style="margin:0;">
                         <input type="hidden" name="banner_id" value="{b["id"]}">
                         <button type="submit" class="btn-sm btn-danger">Удалить</button>
                     </form>
@@ -559,7 +567,7 @@ def admin_dashboard(request: Request, message: str = "", q: str = ""):
                     <span class="msg-nick">{m.get("author") or "Anon"}:</span>
                     <span>{m.get("text") or ""}</span>
                 </div>
-                <form action="/admin/chat/delete" method="POST" style="margin:0;">
+                <form action="{SECRET_ADMIN_PATH}/chat/delete" method="POST" style="margin:0;">
                     <input type="hidden" name="msg_id" value="{m["id"]}">
                     <button type="submit" class="btn-sm btn-danger">✕</button>
                 </form>
@@ -572,7 +580,7 @@ def admin_dashboard(request: Request, message: str = "", q: str = ""):
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>GHOSTCORE | Админ-панель</title>
+        <title>Панель управления</title>
         <style>
             :root {{
                 --bg: #060609;
@@ -880,10 +888,10 @@ def admin_dashboard(request: Request, message: str = "", q: str = ""):
     <body>
         <div class="wrap">
             <div class="top">
-                <div class="brand">GHOSTCORE ADMIN</div>
+                <div class="brand">CONTROL PANEL</div>
                 <div class="top-links">
                     <a href="/" class="btn-ghost">Главная</a>
-                    <a href="/admin/logout" class="btn-ghost">Выйти</a>
+                    <a href="{SECRET_ADMIN_PATH}/logout" class="btn-ghost">Выйти</a>
                 </div>
             </div>
 
@@ -897,13 +905,13 @@ def admin_dashboard(request: Request, message: str = "", q: str = ""):
             <section id="users" class="card">
                 <div class="card-title">Пользователи и ключи ({len(users)})</div>
 
-                <form action="/admin" method="GET" class="search-row">
+                <form action="{SECRET_ADMIN_PATH}" method="GET" class="search-row">
                     <input type="text" name="q" class="field-mini" value="{q}" placeholder="Поиск по имени или ключу...">
                     <button type="submit" class="btn-sm btn-ghost">Найти</button>
-                    <a href="/admin#users" class="btn-sm btn-ghost">Сброс</a>
+                    <a href="{SECRET_ADMIN_PATH}#users" class="btn-sm btn-ghost">Сброс</a>
                 </form>
 
-                <form action="/admin/users/create" method="POST" style="margin-bottom:10px;padding-bottom:10px;border-bottom:1px solid #260d14;">
+                <form action="{SECRET_ADMIN_PATH}/users/create" method="POST" style="margin-bottom:10px;padding-bottom:10px;border-bottom:1px solid #260d14;">
                     <label class="lbl">Выдать новый ключ (уникальное имя)</label>
                     <div class="search-row" style="margin-bottom:6px;">
                         <input type="text" name="client_name" class="field-mini" placeholder="Имя клиента" required>
@@ -920,9 +928,9 @@ def admin_dashboard(request: Request, message: str = "", q: str = ""):
 
             <section class="card">
                 <div class="card-title">Добавить баннер в ротацию</div>
-                <form action="/admin/banners/add" method="POST" enctype="multipart/form-data">
+                <form action="{SECRET_ADMIN_PATH}/banners/add" method="POST" enctype="multipart/form-data">
                     <label class="lbl">Заголовок</label>
-                    <input type="text" name="title" class="field" placeholder="Например: GHOSTCORE VIP" required>
+                    <input type="text" name="title" class="field" placeholder="Например: VIP ДОСТУП" required>
 
                     <label class="lbl">Текст баннера</label>
                     <input type="text" name="text" class="field" placeholder="Короткое описание акции или новости">
@@ -958,7 +966,7 @@ def admin_dashboard(request: Request, message: str = "", q: str = ""):
             <section class="card">
                 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
                     <div class="card-title" style="margin-bottom:0;">Чат сайта ({len(messages)})</div>
-                    <form action="/admin/chat/clear" method="POST" style="margin:0;">
+                    <form action="{SECRET_ADMIN_PATH}/chat/clear" method="POST" style="margin:0;">
                         <button type="submit" class="btn-sm btn-danger">Очистить чат</button>
                     </form>
                 </div>
