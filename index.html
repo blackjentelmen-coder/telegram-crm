@@ -715,6 +715,16 @@
                     <input type="number" name="parser_limit" class="field-box" value="500" min="1">
                 </div>
 
+                <div id="tool-accounts-box" class="camp-box" style="margin-top: 10px;">
+                    <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; margin-bottom:6px;">
+                        <span class="field-label" style="margin:0;">АККАУНТЫ ДЛЯ ЗАДАЧИ:</span>
+                        <button type="button" class="btn-mini" onclick="toggleAllToolAccounts()">ВСЕ / СНЯТЬ</button>
+                    </div>
+                    <div id="tool-accounts-list" style="display:flex; flex-direction:column; gap:6px; font-size:12px;">
+                        <span style="color:#9ca3af;">Загрузка аккаунтов...</span>
+                    </div>
+                </div>
+
                 <button type="submit" class="btn-red" style="margin-top: 14px;">ЗАПУСТИТЬ ЗАДАЧУ</button>
             </form>
         </section>
@@ -760,11 +770,49 @@
                 ["spammer", "inviter", "parser"].forEach(tool => {
                     document.getElementById("block-" + tool).style.display = (tool === section) ? "block" : "none";
                 });
+                if (section === "spammer" || section === "inviter" || section === "parser") { loadToolAccounts(); }
                 if (section === "spammer") loadSpamCampaign();
             }
 
             if (section === "accounts") loadAccounts();
             if (section === "notifications") loadNotifications();
+        }
+
+
+        let cachedToolAccounts = [];
+
+        function renderToolAccountsPicker() {
+            const box = document.getElementById("tool-accounts-list");
+            if (!box) return;
+            const activeOnly = cachedToolAccounts.filter(a => a.status === "Активен");
+            if (!activeOnly.length) {
+                box.innerHTML = `<span style="color:#ff6b81;">Нет аккаунтов со статусом «Активен». Проверьте их в разделе «Аккаунты».</span>`;
+                return;
+            }
+            box.innerHTML = activeOnly.map(a => {
+                const label = `${escapeHtml(a.phone || ("#" + a.id))}${a.proxy_display ? " [" + escapeHtml(a.proxy_display) + "]" : ""}`;
+                return `<label style="display:flex; align-items:center; gap:8px; cursor:pointer; padding:4px 6px; background:#0b080c; border:1px solid #231119; border-radius:6px;">
+                    <input type="checkbox" class="tool-acc-chk" name="account_ids[]" value="${a.id}" checked>
+                    <span>${label}</span>
+                </label>`;
+            }).join("");
+        }
+
+        function toggleAllToolAccounts() {
+            const boxes = Array.from(document.querySelectorAll(".tool-acc-chk"));
+            if (!boxes.length) return;
+            const allChecked = boxes.every(b => b.checked);
+            boxes.forEach(b => { b.checked = !allChecked; });
+        }
+
+        async function loadToolAccounts() {
+            try {
+                const res = await fetch("/api/accounts");
+                if (!res.ok) return;
+                const data = await res.json();
+                cachedToolAccounts = Array.isArray(data.accounts) ? data.accounts : [];
+                renderToolAccountsPicker();
+            } catch (e) {}
         }
 
         function setTargetType(val) {
