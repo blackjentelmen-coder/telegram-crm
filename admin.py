@@ -427,20 +427,41 @@ def admin_save_user_note(request: Request, user_id: int = Form(...), admin_note:
 ALLOWED_ADMIN_BADGE_STYLES = {"vip", "staff", "mod", "tester", "pro", "alert"}
 
 
+BADGE_PRESETS = {
+    "none": ("", "vip"),
+    "vip": ("VIP", "vip"),
+    "staff": ("STAFF", "staff"),
+    "mod": ("MOD", "mod"),
+    "tester": ("TESTER", "tester"),
+    "pro": ("PRO", "pro"),
+    "alert": ("ALERT", "alert"),
+}
+
+
 @router.post(f"{SECRET_ADMIN_PATH}/users/badge")
 def admin_set_user_badge(
     request: Request,
     user_id: int = Form(...),
+    badge_role: str = Form("none"),
     badge_label: str = Form(""),
-    badge_style: str = Form("vip"),
+    badge_style: str = Form(""),
 ):
     if not is_admin_logged_in(request):
         return RedirectResponse(url=SECRET_ADMIN_PATH, status_code=303)
     ensure_admin_schema()
-    clean_label = (badge_label or "").strip()[:24]
-    clean_style = (badge_style or "vip").strip().lower()
-    if clean_style not in ALLOWED_ADMIN_BADGE_STYLES:
-        clean_style = "vip"
+
+    role_key = (badge_role or "").strip().lower()
+    custom_txt = (badge_label or "").strip()[:24]
+
+    if custom_txt:
+        clean_label = custom_txt
+        clean_style = (badge_style or role_key or "vip").strip().lower()
+        if clean_style not in ALLOWED_ADMIN_BADGE_STYLES:
+            clean_style = "vip"
+    elif role_key in BADGE_PRESETS:
+        clean_label, clean_style = BADGE_PRESETS[role_key]
+    else:
+        clean_label, clean_style = "", "vip"
 
     db = get_db()
     db.execute(
@@ -483,10 +504,10 @@ def _render_user_card(u: dict) -> str:
     note_val = u.get("admin_note") or ""
     badge_label = (u.get("badge_label") or "").strip()
     badge_style = (u.get("badge_style") or "vip").lower()
-    badge_label_attr = badge_label.replace('"', "&quot;")
+    current_role_val = badge_style if (badge_label and badge_label.upper() == badge_style.upper()) else ("none" if not badge_label else badge_style)
 
     def _bopt(val: str, title: str) -> str:
-        sel = " selected" if badge_style == val else ""
+        sel = " selected" if current_role_val == val else ""
         return f'<option value="{val}"{sel}>{title}</option>'
 
     custom_badge_html = (
@@ -581,8 +602,8 @@ def _render_user_card(u: dict) -> str:
 
         <form action="{SECRET_ADMIN_PATH}/users/badge" method="POST" class="u-note-form">
             <input type="hidden" name="user_id" value="{u["id"]}">
-            <input type="text" name="badge_label" class="field-mini" maxlength="24" value="{badge_label_attr}" placeholder="Бейдж (STAFF, VIP, MOD...)">
-            <select name="badge_style" class="field-mini" style="max-width:112px;">
+            <select name="badge_role" class="field-mini">
+                {_bopt("none", "Без бейджа")}
                 {_bopt("vip", "VIP")}
                 {_bopt("staff", "STAFF")}
                 {_bopt("mod", "MOD")}
@@ -590,7 +611,7 @@ def _render_user_card(u: dict) -> str:
                 {_bopt("pro", "PRO")}
                 {_bopt("alert", "ALERT")}
             </select>
-            <button type="submit" class="btn-sm btn-paid">Бейдж</button>
+            <button type="submit" class="btn-sm btn-paid">Сохранить</button>
         </form>
 
         <details class="u-details">
