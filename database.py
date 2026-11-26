@@ -71,6 +71,12 @@ def init_db():
     """)
 
     acc_cols = [r["name"] for r in cursor.execute("PRAGMA table_info(client_tg_accounts)").fetchall()]
+    if "session_string" not in acc_cols:
+        cursor.execute("ALTER TABLE client_tg_accounts ADD COLUMN session_string TEXT NOT NULL DEFAULT ''")
+    if "phone_code_hash" not in acc_cols:
+        cursor.execute("ALTER TABLE client_tg_accounts ADD COLUMN phone_code_hash TEXT")
+    if "status" not in acc_cols:
+        cursor.execute("ALTER TABLE client_tg_accounts ADD COLUMN status TEXT DEFAULT 'Ожидает код'")
     if "status_reason" not in acc_cols:
         cursor.execute("ALTER TABLE client_tg_accounts ADD COLUMN status_reason TEXT NOT NULL DEFAULT ''")
     if "checked_at" not in acc_cols:
