@@ -125,7 +125,7 @@ def ensure_bot_schema():
 
 def set_tg_account_status(account_id: int, status: str, reason: str = ""):
     init_db()
-    now_str = datetime.now().strftime("%H:%M")
+    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     clean_reason = (reason or "").strip()[:200]
     conn = get_db()
     conn.execute(
@@ -138,40 +138,6 @@ def set_tg_account_status(account_id: int, status: str, reason: str = ""):
     )
     conn.commit()
     conn.close()
-
-
-def update_tg_account_auth_status(account_id: int, status: str, session_string: str, reason: str = ""):
-    init_db()
-    now_str = datetime.now().strftime("%H:%M")
-    clean_reason = (reason or "").strip()[:200]
-    conn = get_db()
-    conn.execute(
-        """
-        UPDATE client_tg_accounts
-        SET session_string = ?, phone_code_hash = NULL, status = ?, status_reason = ?, checked_at = ?
-        WHERE id = ?
-        """,
-        (session_string, status, clean_reason, now_str, int(account_id)),
-    )
-    conn.commit()
-    conn.close()
-
-
-def get_client_tg_accounts(client_key: str) -> list:
-    init_db()
-    clean_key = (client_key or "").strip().upper()
-    conn = get_db()
-    rows = conn.execute(
-        """
-        SELECT id, client_key, phone, status, status_reason, checked_at
-        FROM client_tg_accounts
-        WHERE client_key = ?
-        ORDER BY id DESC
-        """,
-        (clean_key,),
-    ).fetchall()
-    conn.close()
-    return [dict(r) for r in rows]
 
 
 def add_site_notification(client_key: str, title: str, message: str, level: str = "info"):
