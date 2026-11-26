@@ -41,6 +41,10 @@ from database import (
     add_site_notification,
     get_site_notifications,
     mark_notifications_read,
+    create_or_update_spam_campaign,
+    save_spam_campaign_progress,
+    get_latest_spam_campaign,
+    get_spam_campaign_by_id,
     ACCOUNT_STATUS_ACTIVE,
     ACCOUNT_STATUS_SPAM,
     ACCOUNT_STATUS_SESSION_LOST,
@@ -353,6 +357,14 @@ def api_get_accounts(request: Request):
     return JSONResponse({"authenticated": True, "accounts": [dict(r) for r in rows]})
 
 
+@app.get("/api/spam-campaign")
+def api_get_spam_campaign(request: Request):
+    client_key = request.cookies.get("client_session")
+    if not get_authorized_client(client_key):
+        return JSONResponse({"campaign": None}, status_code=401)
+    return JSONResponse({"campaign": get_latest_spam_campaign(client_key)})
+
+
 @app.post("/cabinet/check-account")
 async def check_single_account(request: Request, acc_id: int = Form(...)):
     client_key = request.cookies.get("client_session")
@@ -379,7 +391,7 @@ async def check_single_account(request: Request, acc_id: int = Form(...)):
     status_label = checked.get("status") or "Неизвестно"
     reason_part = f" ({checked['status_reason']})" if checked.get("status_reason") else ""
     msg = urllib.parse.quote(f"Статус аккаунта: {status_label}{reason_part}")
-    return RedirectResponse(url=f"/cabinet?message={msg}", status_code=303)
+    return RedirectResponse(url=f"/cabinet?message={msg}#accounts", status_code=303)
 
 
 @app.get("/api/notifications")
@@ -1845,16 +1857,22 @@ async def run_client_task(request: Request):
         res_text = "Ошибка: Нет активных авторизованных аккаунтов!"
     else:
         clients = []
+        valid_meta = []
         for acc in active_accs:
             checked = await check_and_sync_account(acc, client_key)
             if checked.get("client"):
                 clients.append(checked["client"])
+                valid_meta.append({"id": checked["id"], "phone": checked.get("phone") or ""})
 
         if not clients:
             res_text = "Ошибка: Ни один из сохраненных аккаунтов не авторизован в Telegram!"
         else:
             try:
                 if task_type == "spammer":
+                    resume_flag = str(form.get("resume_campaign", "")).lower() in ("1", "true", "on", "yes")
+                    raw_camp_id = str(form.get("campaign_id", "")).strip()
+                    camp_id = int(raw_camp_id) if raw_camp_id.isdigit() else None
+
                     targets_raw = form.get("spam_targets", "").strip()
                     targets = [t.strip() for t in targets_raw.split("\n") if t.strip()]
                     target_type = form.get("target_type", "chats")
@@ -1865,23 +1883,70 @@ async def run_client_task(request: Request):
 
                     texts = form.getlist("spam_texts[]") if spam_mode == "text" else None
                     forward_links = form.getlist("spam_links[]") if spam_mode == "forward" else None
+                    content_items = [x.strip() for x in ((texts or []) if spam_mode == "text" else (forward_links or [])) if x and x.strip()]
+
+                    existing_camp = get_spam_campaign_by_id(camp_id, client_key) if camp_id else None
+                    if not existing_camp and resume_flag:
+                        existing_camp = get_latest_spam_campaign(client_key)
+
+                    if existing_camp and (resume_flag or not targets):
+                        camp = existing_camp
+                        use_targets = camp["remaining_targets"]
+                        use_content = content_items or camp["content_items"]
+                        use_type = camp["target_type"]
+                        use_mode = camp["spam_mode"]
+                        use_order = camp["spam_order"]
+                        use_delay = int(form.get("spam_delay") or camp["delay_sec"] or 5)
+                        use_limit = int(form.get("spam_limit") or camp["limit_per_account"] or 20)
+                    else:
+                        camp = create_or_update_spam_campaign(
+                            client_key=client_key,
+                            targets=targets,
+                            content_items=content_items,
+                            target_type=target_type,
+                            spam_mode=spam_mode,
+                            spam_order=spam_order,
+                            delay_sec=delay_sec,
+                            limit_per_account=limit_per_account,
+                            campaign_id=camp_id,
+                        )
+                        use_targets = camp["remaining_targets"]
+                        use_content = camp["content_items"]
+                        use_type = camp["target_type"]
+                        use_mode = camp["spam_mode"]
+                        use_order = camp["spam_order"]
+                        use_delay = camp["delay_sec"]
+                        use_limit = camp["limit_per_account"]
 
                     res = await spammer.run_spammer(
                         clients=clients,
-                        targets=targets,
-                        target_type=target_type,
-                        spam_mode=spam_mode,
-                        spam_order=spam_order,
-                        texts=texts,
-                        forward_links=forward_links,
-                        limit_per_account=limit_per_account,
-                        delay_sec=delay_sec,
+                        targets=use_targets,
+                        target_type=use_type,
+                        spam_mode=use_mode,
+                        spam_order=use_order,
+                        texts=use_content if use_mode == "text" else None,
+                        forward_links=use_content if use_mode == "forward" else None,
+                        limit_per_account=use_limit,
+                        delay_sec=use_delay,
+                        already_sent=camp["sent_targets"],
+                        already_nonexistent=camp["nonexistent_targets"],
+                        account_meta=valid_meta,
                     )
-                    if res.get("flood_wait", 0) > 0:
-                        for acc in active_accs:
-                            set_tg_account_status(acc["id"], ACCOUNT_STATUS_SPAM, "Словлен FloodWait при рассылке")
-                            log_warn(f"Аккаунт {acc['phone']}: FloodWait -> {ACCOUNT_STATUS_SPAM}")
-                    res_text = f"Спамер завершен. Успешно: {res.get('success', 0)}, Ошибок: {res.get('failed', 0)}, FloodWait: {res.get('flood_wait', 0)}"
+
+                    saved_camp = save_spam_campaign_progress(
+                        campaign_id=camp["id"],
+                        remaining_targets=res.get("remaining_targets", []),
+                        sent_targets=res.get("sent_targets", []),
+                        nonexistent_targets=res.get("nonexistent_targets", []),
+                        failed_accounts=res.get("failed_accounts", []),
+                    )
+
+                    res_text = (
+                        f"Рассылка #{saved_camp['id']} ({saved_camp['status']}): "
+                        f"отправлено={len(saved_camp['sent_targets'])}, "
+                        f"не существует={len(saved_camp['nonexistent_targets'])}, "
+                        f"осталось={len(saved_camp['remaining_targets'])}"
+                    )
 
                 elif task_type == "inviter":
                     target_chat = form.get("inviter_target", "").strip()
@@ -1950,7 +2015,7 @@ async def run_client_task(request: Request):
 
     log_ok(f"Задача {task_type} завершена: {res_text}")
     notify_user_sync(client_key, f"Задача ({task_type}): {res_text}")
-    return RedirectResponse(url="/cabinet?message=Задача обработана!", status_code=303)
+    return RedirectResponse(url="/cabinet?message=Задача обработана!#spammer", status_code=303)
 
 
 @app.get("/logout-client")
