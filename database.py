@@ -11,8 +11,13 @@ ACCOUNT_STATUS_PENDING = "Ожидает код"
 
 
 def get_db():
-    conn = sqlite3.connect(DB_NAME, check_same_thread=False)
+    conn = sqlite3.connect(DB_NAME, timeout=30.0, check_same_thread=False)
     conn.row_factory = sqlite3.Row
+    try:
+        conn.execute("PRAGMA busy_timeout = 30000")
+        conn.execute("PRAGMA journal_mode = WAL")
+    except Exception:
+        pass
     return conn
 
 
@@ -396,7 +401,6 @@ def mark_notifications_read(client_key: str):
 def get_client_profile(key_code: str):
     if not key_code:
         return None
-    init_db()
     clean_key = key_code.strip().upper()
     conn = get_db()
     row = conn.execute(
