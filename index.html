@@ -985,6 +985,10 @@
             const toast = document.getElementById("status-toast");
             toast.textContent = msg;
             toast.style.display = "block";
+            window.history.replaceState({}, document.title, window.location.pathname + window.location.hash);
+            setTimeout(() => {
+                toast.style.display = "none";
+            }, 5000);
         }
 
         if (window.location.hash === "#inviter") openSection("inviter");
