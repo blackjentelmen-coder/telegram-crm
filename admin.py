@@ -1,5 +1,6 @@
 import os
 import sqlite3
+import uuid as _uuid
 from fastapi import APIRouter, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from database import (
@@ -109,6 +110,22 @@ def fetch_users_with_messages(search_query: str = "") -> list:
     except sqlite3.OperationalError:
         recent = get_recent_chat_messages(limit=200)
         all_msgs = list(reversed(recent)) if recent else []
+
+    acc_by_key = {}
+    try:
+        acc_cols = [r["name"] for r in db.execute("PRAGMA table_info(client_tg_accounts)").fetchall()]
+        has_reason = "status_reason" in acc_cols
+        sel = (
+            "SELECT client_key, phone, status, status_reason FROM client_tg_accounts ORDER BY id DESC"
+            if has_reason
+            else "SELECT client_key, phone, status, '' AS status_reason FROM client_tg_accounts ORDER BY id DESC"
+        )
+        for r in db.execute(sel).fetchall():
+            k = (r["client_key"] or "").strip().upper()
+            acc_by_key.setdefault(k, []).append(dict(r))
+    except sqlite3.OperationalError:
+        acc_by_key = {}
+
     db.close()
 
     for u in users:
@@ -120,6 +137,7 @@ def fetch_users_with_messages(search_query: str = "") -> list:
             if (name and author_low == name) or (key and author_low == key):
                 user_msgs.append(m)
         u["messages"] = user_msgs[:15]
+        u["tg_accounts"] = acc_by_key.get((u.get("key_code") or "").strip().upper(), [])
 
     return users
 
@@ -266,7 +284,6 @@ def admin_create_user(request: Request, client_name: str = Form(...), is_paid: s
         db.close()
         return RedirectResponse(url="/admin?message=Ошибка:+имя+уже+занято#users", status_code=303)
 
-    import uuid as _uuid
     new_key = str(_uuid.uuid4())[:8].upper()
     paid_flag = 1 if is_paid in ("on", "1", "true", "yes") else 0
     db.execute(
@@ -350,6 +367,16 @@ def admin_delete_user(request: Request, user_id: int = Form(...)):
     return RedirectResponse(url="/admin?message=Пользователь+удалён#users", status_code=303)
 
 
+def _acc_badge_html(st: str) -> str:
+    if st == "Активен":
+        return '<span class="badge badge-on">Активен</span>'
+    if st == "Спам":
+        return '<span class="badge badge-warn">Спам</span>'
+    if st == "Слетела сессия":
+        return '<span class="badge badge-danger">Слетела сессия</span>'
+    return f'<span class="badge badge-off">{st or "Ожидает код"}</span>'
+
+
 def _render_user_card(u: dict) -> str:
     u_name = u.get("client_name") or "Без имени"
     u_key = u.get("key_code") or "—"
@@ -373,6 +400,18 @@ def _render_user_card(u: dict) -> str:
         if is_muted
         else '<span class="badge badge-off">ЧАТ ОК</span>'
     )
+
+    u_accs = u.get("tg_accounts") or []
+    if not u_accs:
+        accs_block = '<div class="u-msg-empty">TG-аккаунтов нет.</div>'
+    else:
+        acc_items = "".join(
+            f'<div class="u-msg-line">• <b>{a.get("phone") or ""}</b> — {_acc_badge_html(a.get("status") or "")}'
+            + (f' <span style="color:#9e969b;">({a.get("status_reason")})</span>' if a.get("status_reason") else "")
+            + "</div>"
+            for a in u_accs
+        )
+        accs_block = f'<div class="u-msg-box">{acc_items}</div>'
 
     u_msgs = u.get("messages") or []
     if not u_msgs:
@@ -428,6 +467,11 @@ def _render_user_card(u: dict) -> str:
             <input type="text" name="admin_note" class="field-mini" value="{note_val}" placeholder="Заметка о пользователе...">
             <button type="submit" class="btn-sm btn-ghost">Сохранить</button>
         </form>
+
+        <details class="u-details">
+            <summary class="u-summary">TG-аккаунты ({len(u_accs)})</summary>
+            {accs_block}
+        </details>
 
         <details class="u-details">
             <summary class="u-summary">СМС пользователя в чате ({len(u_msgs)})</summary>
@@ -750,7 +794,7 @@ def admin_dashboard(request: Request, message: str = "", q: str = ""):
             .u-msg-line {{
                 font-size: 11px;
                 color: #e6d6da;
-                padding: 2px 0;
+                padding: 3px 0;
                 word-break: break-word;
             }}
             .u-msg-empty {{
@@ -881,47 +925,39 @@ def admin_dashboard(request: Request, message: str = "", q: str = ""):
                     <input type="text" name="title" class="field" placeholder="Например: GHOSTCORE VIP" required>
 
                     <label class="lbl">Текст баннера</label>
-                    <input type="text" name="text" class="field" placeholder="Короткий промо-текст" required>
+                    <input type="text" name="text" class="field" placeholder="Короткое описание акции или новости">
+
+                    <label class="lbl">Ссылка (необязательно)</label>
+                    <input type="text" name="url" class="field" placeholder="https://t.me/...">
 
                     <div class="row-2">
                         <div>
-                            <label class="lbl">Время показа (сек)</label>
-                            <input type="number" name="duration_sec" class="field" value="8" min="2" max="3600" required>
+                            <label class="lbl">Длительность (сек)</label>
+                            <input type="number" name="duration_sec" class="field" value="8" min="2" max="3600">
                         </div>
                         <div>
-                            <label class="lbl">Ссылка (необязательно)</label>
-                            <input type="text" name="url" class="field" placeholder="https://...">
+                            <label class="lbl">Картинка</label>
+                            <input type="file" name="image" class="field" accept="image/*">
                         </div>
                     </div>
 
-                    <label class="lbl">Картинка (необязательно)</label>
-                    <input type="file" name="image" accept=".jpg,.jpeg,.png,.gif,.webp" class="field">
-
                     <label class="check-line">
                         <input type="checkbox" name="active" checked>
-                        <span>Показывать на главной странице</span>
+                        <span>Показывать баннер в ротации</span>
                     </label>
 
-                    <button type="submit" class="btn-main">+ Добавить баннер</button>
+                    <button type="submit" class="btn-main">Добавить баннер</button>
                 </form>
             </section>
 
             <section class="card">
-                <div class="card-title">Баннеры и таймеры ({len(banners)})</div>
+                <div class="card-title">Активные и сохранённые баннеры ({len(banners)})</div>
                 {banner_rows_html}
-                <div class="b-actions" style="margin-top:10px;padding-top:8px;border-top:1px solid #260d14;">
-                    <form action="/admin/banner/disable" method="POST" style="margin:0;">
-                        <button type="submit" class="btn-sm btn-ghost">Отключить старый баннер</button>
-                    </form>
-                    <form action="/admin/banner/clear-legacy" method="POST" style="margin:0;">
-                        <button type="submit" class="btn-sm btn-danger">Очистить старый баннер</button>
-                    </form>
-                </div>
             </section>
 
             <section class="card">
-                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
-                    <div class="card-title" style="margin:0;">Чат (модерация)</div>
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+                    <div class="card-title" style="margin-bottom:0;">Чат сайта ({len(messages)})</div>
                     <form action="/admin/chat/clear" method="POST" style="margin:0;">
                         <button type="submit" class="btn-sm btn-danger">Очистить чат</button>
                     </form>
