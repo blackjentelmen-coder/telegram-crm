@@ -226,6 +226,77 @@ def init_banners_table():
 init_banners_table()
 
 
+def init_pulse_table():
+    db = get_db()
+    db.execute(
+        """
+        CREATE TABLE IF NOT EXISTS live_pulse (
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            status_text TEXT NOT NULL DEFAULT 'ONLINE // СИСТЕМА АКТИВНА',
+            badge_type TEXT NOT NULL DEFAULT 'live',
+            updated_at REAL NOT NULL DEFAULT 0
+        )
+        """
+    )
+    db.execute(
+        """
+        INSERT OR IGNORE INTO live_pulse (id, status_text, badge_type, updated_at)
+        VALUES (1, 'ONLINE // СИСТЕМА АКТИВНА', 'live', ?)
+        """,
+        (time.time(),),
+    )
+    db.commit()
+    db.close()
+
+
+init_pulse_table()
+
+
+def get_live_pulse() -> dict:
+    init_pulse_table()
+    db = get_db()
+    row = db.execute(
+        "SELECT status_text, badge_type, updated_at FROM live_pulse WHERE id = 1"
+    ).fetchone()
+    db.close()
+    if not row:
+        return {"status_text": "ONLINE // СИСТЕМА АКТИВНА", "badge_type": "live", "updated_at": 0}
+    return dict(row)
+
+
+@app.get("/api/pulse")
+def api_get_pulse():
+    return JSONResponse({"pulse": get_live_pulse()})
+
+
+@app.post(f"{SECRET_PATH}/pulse/update")
+def admin_update_pulse(
+    request: Request,
+    status_text: str = Form(...),
+    badge_type: str = Form("live"),
+):
+    if not is_admin_authenticated(request):
+        return JSONResponse({"error": "Admin access required"}, status_code=403)
+
+    allowed = {"live", "drop", "event", "alert"}
+    clean_badge = badge_type if badge_type in allowed else "live"
+    clean_text = status_text.strip()[:120] or "ONLINE // СИСТЕМА АКТИВНА"
+
+    init_pulse_table()
+    db = get_db()
+    db.execute(
+        """
+        UPDATE live_pulse
+        SET status_text = ?, badge_type = ?, updated_at = ?
+        WHERE id = 1
+        """,
+        (clean_text, clean_badge, time.time()),
+    )
+    db.commit()
+    db.close()
+    return RedirectResponse(url=f"{SECRET_PATH}?message=Пульс+обновлён", status_code=303)
+
+
 def get_active_home_banners() -> List[dict]:
     init_banners_table()
     db = get_db()
@@ -341,6 +412,7 @@ def api_home_data(request: Request):
     banners = get_active_home_banners()
     first_banner = banners[0] if banners else None
     return JSONResponse({
+        "pulse": get_live_pulse(),
         "banner": first_banner,
         "banners": banners,
         "messages": messages,
@@ -828,6 +900,7 @@ def home_page(request: Request, error: str = None):
                 const res = await fetch("/api/home-data");
                 if (!res.ok) return;
                 const data = await res.json();
+                if (data.pulse) renderPulse(data.pulse);
                 startBannerRotation(Array.isArray(data.banners) ? data.banners : []);
                 if (data.is_muted) {
                     showChatNotice("Вы замучены в чате администратором.");
@@ -884,6 +957,7 @@ def home_page(request: Request, error: str = None):
                 const res = await fetch("/api/home-data");
                 if (!res.ok) return;
                 const data = await res.json();
+                if (data.pulse) renderPulse(data.pulse);
                 startBannerRotation(Array.isArray(data.banners) ? data.banners : []);
             } catch (e) {
                 console.error(e);
@@ -1041,6 +1115,62 @@ def home_page(request: Request, error: str = None):
             .top-zone {{
                 margin-bottom: 12px;
             }}
+            .pulse-bar {{
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                gap: 8px;
+                padding: 8px 12px;
+                border-radius: 10px;
+                margin-bottom: 8px;
+                font-size: 12px;
+                font-weight: 700;
+                letter-spacing: 0.4px;
+                background: #14090e;
+                border: 1px solid var(--neon-red);
+                box-shadow: 0 0 10px var(--neon-red-soft);
+            }}
+            .pulse-left {{
+                display: flex;
+                align-items: center;
+                gap: 8px;
+                min-width: 0;
+            }}
+            .pulse-dot {{
+                width: 8px;
+                height: 8px;
+                border-radius: 50%;
+                flex: 0 0 auto;
+                background: var(--neon-red);
+                box-shadow: 0 0 8px var(--neon-red);
+                animation: pulseBlink 1.6s infinite ease-in-out;
+            }}
+            @keyframes pulseBlink {{
+                0%, 100% {{ opacity: 1; transform: scale(1); }}
+                50% {{ opacity: 0.45; transform: scale(0.85); }}
+            }}
+            .pulse-tag {{
+                font-size: 9px;
+                font-weight: 800;
+                letter-spacing: 0.8px;
+                text-transform: uppercase;
+                padding: 2px 6px;
+                border-radius: 999px;
+                border: 1px solid currentColor;
+                flex: 0 0 auto;
+            }}
+            .pulse-live {{ border-color: #22c55e; box-shadow: 0 0 10px rgba(34, 197, 94, 0.25); }}
+            .pulse-live .pulse-dot {{ background: #22c55e; box-shadow: 0 0 8px #22c55e; }}
+            .pulse-live .pulse-tag {{ color: #22c55e; }}
+            .pulse-drop {{ border-color: #a855f7; box-shadow: 0 0 10px rgba(168, 85, 247, 0.28); }}
+            .pulse-drop .pulse-dot {{ background: #a855f7; box-shadow: 0 0 8px #a855f7; }}
+            .pulse-drop .pulse-tag {{ color: #c084fc; }}
+            .pulse-event {{ border-color: #38bdf8; box-shadow: 0 0 10px rgba(56, 189, 248, 0.25); }}
+            .pulse-event .pulse-dot {{ background: #38bdf8; box-shadow: 0 0 8px #38bdf8; }}
+            .pulse-event .pulse-tag {{ color: #38bdf8; }}
+            .pulse-alert {{ border-color: var(--neon-red); box-shadow: 0 0 10px var(--neon-red-soft); }}
+            .pulse-alert .pulse-dot {{ background: var(--neon-red); box-shadow: 0 0 8px var(--neon-red); }}
+            .pulse-alert .pulse-tag {{ color: var(--neon-red); }}
             .banner-card {{
                 display: none;
                 position: relative;
@@ -1270,6 +1400,13 @@ def home_page(request: Request, error: str = None):
             </header>
 
             <div class="top-zone">
+                <div id="live-pulse-bar" class="pulse-bar pulse-live" style="display:none;">
+                    <div class="pulse-left">
+                        <span class="pulse-dot"></span>
+                        <span id="live-pulse-text"></span>
+                    </div>
+                    <span id="live-pulse-tag" class="pulse-tag">LIVE</span>
+                </div>
                 <a id="ad-banner" href="#" target="_blank" class="banner-card">
                     <img id="ad-image" class="banner-img" src="" alt="Banner">
                     <div id="ad-body" class="banner-overlay">
@@ -1387,6 +1524,34 @@ def home_page(request: Request, error: str = None):
 
                 step();
             }}
+
+            function renderPulse(pulse) {{
+                const bar = document.getElementById("live-pulse-bar");
+                const txt = document.getElementById("live-pulse-text");
+                const tag = document.getElementById("live-pulse-tag");
+                if (!bar || !txt || !tag) return;
+                if (!pulse || !pulse.status_text) {{
+                    bar.style.display = "none";
+                    return;
+                }}
+                const badge = (pulse.badge_type || "live").toLowerCase();
+                bar.className = "pulse-bar pulse-" + badge;
+                txt.textContent = pulse.status_text;
+                tag.textContent = badge.toUpperCase();
+                bar.style.display = "flex";
+            }}
+
+            async function refreshPulse() {{
+                try {{
+                    const res = await fetch("/api/pulse", {{ cache: "no-store" }});
+                    if (!res.ok) return;
+                    const data = await res.json();
+                    renderPulse(data.pulse);
+                }} catch (e) {{}}
+            }}
+
+            refreshPulse();
+            setInterval(refreshPulse, 15000);
 
             {chat_script}
         </script>
