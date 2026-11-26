@@ -76,6 +76,8 @@ def init_db():
     """)
 
     acc_cols = [r["name"] for r in cursor.execute("PRAGMA table_info(client_tg_accounts)").fetchall()]
+    if "session_name" in acc_cols:
+        cursor.execute("UPDATE client_tg_accounts SET session_name = '' WHERE session_name IS NULL")
     if "session_string" not in acc_cols:
         cursor.execute("ALTER TABLE client_tg_accounts ADD COLUMN session_string TEXT NOT NULL DEFAULT ''")
     if "phone_code_hash" not in acc_cols:
