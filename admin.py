@@ -278,63 +278,6 @@ def render_admin_login(error: str = "") -> str:
                 font-size: 12px;
                 text-decoration: none;
             }}
-
-            .admin-tabs {{
-                display: grid;
-                grid-template-columns: repeat(2, 1fr);
-                gap: 8px;
-                margin-bottom: 12px;
-                background: #0c070a;
-                border: 1px solid var(--border);
-                border-radius: 10px;
-                padding: 8px;
-            }}
-            @media (min-width: 640px) {{
-                .admin-tabs {{
-                    grid-template-columns: repeat(4, 1fr);
-                }}
-            }}
-            .tab-btn {{
-                display: flex;
-                flex-direction: column;
-                align-items: center;
-                justify-content: center;
-                gap: 4px;
-                min-height: 48px;
-                padding: 8px 8px;
-                border-radius: 8px;
-                border: 1px solid #2b1017;
-                background: #12090d;
-                color: var(--muted);
-                font-size: 11px;
-                font-weight: 800;
-                text-transform: uppercase;
-                letter-spacing: 0.4px;
-                cursor: pointer;
-                text-align: center;
-                line-height: 1.2;
-            }}
-            .tab-btn.active {{
-                background: rgba(255, 30, 66, 0.18);
-                border-color: var(--red);
-                color: var(--text);
-                box-shadow: 0 0 10px var(--red-soft);
-            }}
-            .tab-cnt {{
-                display: inline-flex;
-                align-items: center;
-                justify-content: center;
-                min-width: 22px;
-                padding: 1px 7px;
-                border-radius: 999px;
-                background: rgba(255, 255, 255, 0.06);
-                font-size: 10px;
-                font-weight: 800;
-                color: #ffd6de;
-                line-height: 1.3;
-            }}
-            .admin-pane {{ display: none; }}
-            .admin-pane.active {{ display: block; }}
         </style>
     </head>
     <body>
@@ -347,50 +290,7 @@ def render_admin_login(error: str = "") -> str:
             <button type="submit" class="btn">Войти в панель</button>
             <a href="/" class="back">← На главную</a>
         </form>
-
-        <script>
-            function switchAdminTab(tabName) {{
-                const valid = ["users", "banners", "chat", "vip"];
-                const target = valid.includes(tabName) ? tabName : "users";
-                document.querySelectorAll(".tab-btn").forEach(btn => {{
-                    btn.classList.toggle("active", btn.dataset.tab === target);
-                }});
-                document.querySelectorAll(".admin-pane").forEach(pane => {{
-                    pane.classList.toggle("active", pane.dataset.pane === target);
-                }});
-                try {{
-                    localStorage.setItem("ghostcore_admin_tab", target);
-                }} catch (e) {{}}
-                if (history.replaceState) {{
-                    const url = new URL(window.location.href);
-                    url.hash = "tab-" + target;
-                    history.replaceState(null, "", url.toString());
-                }}
-            }}
-
-            (function initAdminTab() {{
-                const params = new URLSearchParams(window.location.search);
-                const hash = (window.location.hash || "").replace(/^#/, "");
-                let initial = "users";
-                if (params.get("q")) {{
-                    initial = "users";
-                }} else if (hash.startsWith("tab-")) {{
-                    initial = hash.slice(4);
-                }} else if (hash === "paid-users") {{
-                    initial = "vip";
-                }} else if (hash === "users") {{
-                    initial = "users";
-                }} else {{
-                    try {{
-                        const saved = localStorage.getItem("ghostcore_admin_tab");
-                        if (saved) initial = saved;
-                    }} catch (e) {{}}
-                }}
-                switchAdminTab(initial);
-            }})();
-        </script>
     </body>
-
     </html>
     """
 
@@ -1155,7 +1055,64 @@ def admin_dashboard(request: Request, message: str = "", q: str = ""):
                 margin-bottom: 10px;
             }}
             .empty {{ font-size: 12px; color: var(--muted); }}
-        </style>
+        
+            .admin-tabs {{
+                display: grid;
+                grid-template-columns: repeat(2, 1fr);
+                gap: 8px;
+                margin-bottom: 12px;
+                background: #0c070a;
+                border: 1px solid var(--border);
+                border-radius: 10px;
+                padding: 8px;
+            }}
+            @media (min-width: 640px) {{
+                .admin-tabs {{
+                    grid-template-columns: repeat(4, 1fr);
+                }}
+            }}
+            .tab-btn {{
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                justify-content: center;
+                gap: 4px;
+                min-height: 48px;
+                padding: 8px 8px;
+                border-radius: 8px;
+                border: 1px solid #2b1017;
+                background: #12090d;
+                color: var(--muted);
+                font-size: 11px;
+                font-weight: 800;
+                text-transform: uppercase;
+                letter-spacing: 0.4px;
+                cursor: pointer;
+                text-align: center;
+                line-height: 1.2;
+            }}
+            .tab-btn.active {{
+                background: rgba(255, 30, 66, 0.18);
+                border-color: var(--red);
+                color: var(--text);
+                box-shadow: 0 0 10px var(--red-soft);
+            }}
+            .tab-cnt {{
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+                min-width: 22px;
+                padding: 1px 7px;
+                border-radius: 999px;
+                background: rgba(255, 255, 255, 0.06);
+                font-size: 10px;
+                font-weight: 800;
+                color: #ffd6de;
+                line-height: 1.3;
+            }}
+            .admin-pane {{ display: none; }}
+            .admin-pane.active {{ display: block; }}
+</style>
     </head>
     <body>
         <div class="wrap">
@@ -1171,16 +1128,16 @@ def admin_dashboard(request: Request, message: str = "", q: str = ""):
 
             <div id="admin-tabs" class="admin-tabs" role="tablist">
                 <button type="button" class="tab-btn active" data-tab="users" onclick="switchAdminTab('users')">
-                    Пользователи<span class="tab-cnt">{len(users)}</span>
+                    <span>Пользователи</span><span class="tab-cnt">{len(users)}</span>
                 </button>
                 <button type="button" class="tab-btn" data-tab="banners" onclick="switchAdminTab('banners')">
-                    Баннеры и пульс<span class="tab-cnt">{len(banners)}</span>
+                    <span>Баннеры и пульс</span><span class="tab-cnt">{len(banners)}</span>
                 </button>
                 <button type="button" class="tab-btn" data-tab="chat" onclick="switchAdminTab('chat')">
-                    Чат<span class="tab-cnt">{len(messages)}</span>
+                    <span>Чат</span><span class="tab-cnt">{len(messages)}</span>
                 </button>
                 <button type="button" class="tab-btn" data-tab="vip" onclick="switchAdminTab('vip')">
-                    VIP<span class="tab-cnt">{len(paid_users)}</span>
+                    <span>VIP</span><span class="tab-cnt">{len(paid_users)}</span>
                 </button>
             </div>
 
