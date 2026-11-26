@@ -3,6 +3,11 @@ from datetime import datetime
 
 DB_NAME = "database.db"
 
+ACCOUNT_STATUS_ACTIVE = "Активен"
+ACCOUNT_STATUS_SPAM = "Спам"
+ACCOUNT_STATUS_SESSION_LOST = "Слетела сессия"
+ACCOUNT_STATUS_PENDING = "Ожидает код"
+
 
 def get_db():
     conn = sqlite3.connect(DB_NAME, check_same_thread=False)
@@ -51,9 +56,17 @@ def init_db():
             phone TEXT NOT NULL,
             session_string TEXT NOT NULL,
             phone_code_hash TEXT,
-            status TEXT DEFAULT 'Ожидает код'
+            status TEXT DEFAULT 'Ожидает код',
+            status_reason TEXT NOT NULL DEFAULT '',
+            checked_at TEXT NOT NULL DEFAULT ''
         )
     """)
+
+    acc_cols = [r["name"] for r in cursor.execute("PRAGMA table_info(client_tg_accounts)").fetchall()]
+    if "status_reason" not in acc_cols:
+        cursor.execute("ALTER TABLE client_tg_accounts ADD COLUMN status_reason TEXT NOT NULL DEFAULT ''")
+    if "checked_at" not in acc_cols:
+        cursor.execute("ALTER TABLE client_tg_accounts ADD COLUMN checked_at TEXT NOT NULL DEFAULT ''")
 
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS client_tasks (
@@ -63,6 +76,18 @@ def init_db():
             target_link TEXT,
             result_text TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS site_notifications (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            client_key TEXT NOT NULL,
+            level TEXT NOT NULL DEFAULT 'info',
+            title TEXT NOT NULL,
+            message TEXT NOT NULL,
+            is_read INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL
         )
     """)
 
@@ -98,6 +123,71 @@ def ensure_bot_schema():
     init_db()
 
 
+def set_tg_account_status(account_id: int, status: str, reason: str = ""):
+    init_db()
+    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    clean_reason = (reason or "").strip()[:200]
+    conn = get_db()
+    conn.execute(
+        """
+        UPDATE client_tg_accounts
+        SET status = ?, status_reason = ?, checked_at = ?
+        WHERE id = ?
+        """,
+        (status, clean_reason, now_str, int(account_id)),
+    )
+    conn.commit()
+    conn.close()
+
+
+def add_site_notification(client_key: str, title: str, message: str, level: str = "info"):
+    init_db()
+    clean_key = (client_key or "").strip().upper()
+    if not clean_key:
+        return
+    now_str = datetime.now().strftime("%H:%M")
+    conn = get_db()
+    conn.execute(
+        """
+        INSERT INTO site_notifications (client_key, level, title, message, is_read, created_at)
+        VALUES (?, ?, ?, ?, 0, ?)
+        """,
+        (clean_key, level, (title or "Уведомление")[:80], (message or "")[:300], now_str),
+    )
+    conn.commit()
+    conn.close()
+
+
+def get_site_notifications(client_key: str, limit: int = 30):
+    init_db()
+    clean_key = (client_key or "").strip().upper()
+    conn = get_db()
+    rows = conn.execute(
+        """
+        SELECT id, level, title, message, is_read, created_at
+        FROM site_notifications
+        WHERE client_key = ?
+        ORDER BY id DESC
+        LIMIT ?
+        """,
+        (clean_key, limit),
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def mark_notifications_read(client_key: str):
+    init_db()
+    clean_key = (client_key or "").strip().upper()
+    conn = get_db()
+    conn.execute(
+        "UPDATE site_notifications SET is_read = 1 WHERE client_key = ?",
+        (clean_key,),
+    )
+    conn.commit()
+    conn.close()
+
+
 def get_client_profile(key_code: str):
     if not key_code:
         return None
@@ -126,12 +216,18 @@ def get_client_profile(key_code: str):
         "SELECT COUNT(*) AS cnt FROM client_tasks WHERE client_key = ?",
         (clean_key,),
     ).fetchone()["cnt"]
+
+    unread_notif_count = conn.execute(
+        "SELECT COUNT(*) AS cnt FROM site_notifications WHERE client_key = ? AND is_read = 0",
+        (clean_key,),
+    ).fetchone()["cnt"]
     conn.close()
 
     data = dict(row)
     data["status_text"] = data.get("status_text") or "В сети"
     data["tg_accounts_count"] = acc_count
     data["tasks_count"] = task_count
+    data["unread_notifications_count"] = unread_notif_count
     return data
 
 
@@ -277,12 +373,12 @@ def get_active_client_tg_accounts(client_key: str) -> list:
     conn = get_db()
     rows = conn.execute(
         """
-        SELECT id, client_key, phone, session_string, status
+        SELECT id, client_key, phone, session_string, status, status_reason, checked_at
         FROM client_tg_accounts
-        WHERE client_key = ? AND status = 'Активен'
+        WHERE client_key = ? AND status = ?
         ORDER BY id DESC
         """,
-        ((client_key or "").strip().upper(),),
+        ((client_key or "").strip().upper(), ACCOUNT_STATUS_ACTIVE),
     ).fetchall()
     conn.close()
     return [dict(r) for r in rows]
