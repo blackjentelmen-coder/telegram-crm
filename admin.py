@@ -76,6 +76,35 @@ def fetch_banners_list() -> list:
     return [dict(r) for r in rows]
 
 
+def fetch_current_pulse() -> dict:
+    db = get_db()
+    try:
+        db.execute(
+            """
+            CREATE TABLE IF NOT EXISTS live_pulse (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                status_text TEXT NOT NULL DEFAULT 'ONLINE // СИСТЕМА АКТИВНА',
+                badge_type TEXT NOT NULL DEFAULT 'live',
+                updated_at REAL NOT NULL DEFAULT 0
+            )
+            """
+        )
+        row = db.execute(
+            "SELECT status_text, badge_type FROM live_pulse WHERE id = 1"
+        ).fetchone()
+        db.commit()
+        if row:
+            return {
+                "status_text": row["status_text"] or "ONLINE // СИСТЕМА АКТИВНА",
+                "badge_type": (row["badge_type"] or "live").lower(),
+            }
+    except sqlite3.OperationalError:
+        pass
+    finally:
+        db.close()
+    return {"status_text": "ONLINE // СИСТЕМА АКТИВНА", "badge_type": "live"}
+
+
 def fetch_users_with_messages(search_query: str = "") -> list:
     ensure_admin_schema()
     db = get_db()
@@ -522,10 +551,38 @@ def admin_dashboard(request: Request, message: str = "", q: str = ""):
     if not is_admin_logged_in(request):
         return HTMLResponse(content=render_admin_login())
 
+    pulse = fetch_current_pulse()
     banners = fetch_banners_list()
     users = fetch_users_with_messages(search_query=q)
     paid_users = [u for u in users if int(u.get("is_paid") or 0) == 1]
     messages = get_recent_chat_messages(limit=30)
+
+    cur_pulse_text = (pulse.get("status_text") or "").replace('"', "&quot;")
+    cur_pulse_badge = (pulse.get("badge_type") or "live").lower()
+
+    def _opt(val: str, label: str) -> str:
+        sel = " selected" if cur_pulse_badge == val else ""
+        return f'<option value="{val}"{sel}>{label}</option>'
+
+    pulse_card_html = f"""
+            <section id="pulse-card" class="card">
+                <div class="card-title">Живой Пульс (статус над чатом)</div>
+                <form action="{SECRET_ADMIN_PATH}/pulse/update" method="POST">
+                    <label class="lbl">Текст статуса</label>
+                    <input type="text" name="status_text" class="field" maxlength="120" value="{cur_pulse_text}" placeholder="Например: Дроп ключей через 10 мин" required>
+
+                    <label class="lbl">Тип индикатора</label>
+                    <select name="badge_type" class="field">
+                        {_opt("live", "LIVE (зелёный)")}
+                        {_opt("drop", "DROP (фиолетовый)")}
+                        {_opt("event", "EVENT (синий)")}
+                        {_opt("alert", "ALERT (красный)")}
+                    </select>
+
+                    <button type="submit" class="btn-main">Обновить Пульс</button>
+                </form>
+            </section>
+    """
 
     msg_html = f'<div class="notice">{message}</div>' if message else ""
 
@@ -924,6 +981,8 @@ def admin_dashboard(request: Request, message: str = "", q: str = ""):
             </div>
 
             {msg_html}
+
+            {pulse_card_html}
 
             <section id="paid-users" class="card">
                 <div class="card-title">Оплатившие / VIP пользователи ({len(paid_users)})</div>
