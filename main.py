@@ -59,6 +59,7 @@ import parser
 API_ID = 38977487
 API_HASH = "a6afb062a4c36f6d7b2cb87d27385672"
 BOT_TOKEN = os.getenv("GHOSTCORE_BOT_TOKEN", "")
+SECRET_PATH = admin.SECRET_ADMIN_PATH
 
 os.makedirs("static/banners", exist_ok=True)
 
@@ -304,20 +305,7 @@ def get_authorized_client(client_key: str):
 
 
 def is_admin_authenticated(request: Request) -> bool:
-    cookie_names = [
-        "admin_session",
-        "admin_token",
-        "is_admin",
-        "admin_auth",
-        "session",
-    ]
-    for name in cookie_names:
-        val = request.cookies.get(name)
-        if val and val.strip().lower() in ("1", "true", "yes", "admin", "ok", "ghostcore_admin_authenticated"):
-            return True
-        if val and len(val.strip()) > 0 and name != "client_session":
-            return True
-    return False
+    return admin.is_admin_logged_in(request)
 
 
 @app.get("/api/home-data")
@@ -418,7 +406,7 @@ def api_admin_banners(request: Request):
     return JSONResponse({"banners": get_all_home_banners()})
 
 
-@app.post("/admin/banners/add")
+@app.post(f"{SECRET_PATH}/banners/add")
 async def admin_add_banner(
     request: Request,
     title: str = Form("GHOSTCORE"),
@@ -455,10 +443,10 @@ async def admin_add_banner(
     db.commit()
     db.close()
 
-    return RedirectResponse(url="/admin?message=Баннер+добавлен", status_code=303)
+    return RedirectResponse(url=f"{SECRET_PATH}?message=Баннер+добавлен", status_code=303)
 
 
-@app.post("/admin/banners/toggle")
+@app.post(f"{SECRET_PATH}/banners/toggle")
 async def admin_toggle_banner(request: Request, banner_id: int = Form(...)):
     if not is_admin_authenticated(request):
         return JSONResponse({"error": "Admin access required"}, status_code=403)
@@ -471,10 +459,10 @@ async def admin_toggle_banner(request: Request, banner_id: int = Form(...)):
         db.execute("UPDATE home_banners SET is_active = ? WHERE id = ?", (next_val, banner_id))
         db.commit()
     db.close()
-    return RedirectResponse(url="/admin?message=Статус+баннера+обновлён", status_code=303)
+    return RedirectResponse(url=f"{SECRET_PATH}?message=Статус+баннера+обновлён", status_code=303)
 
 
-@app.post("/admin/banners/delete")
+@app.post(f"{SECRET_PATH}/banners/delete")
 async def admin_delete_banner(request: Request, banner_id: int = Form(...)):
     if not is_admin_authenticated(request):
         return JSONResponse({"error": "Admin access required"}, status_code=403)
@@ -492,10 +480,10 @@ async def admin_delete_banner(request: Request, banner_id: int = Form(...)):
     db.execute("DELETE FROM home_banners WHERE id = ?", (banner_id,))
     db.commit()
     db.close()
-    return RedirectResponse(url="/admin?message=Баннер+удалён", status_code=303)
+    return RedirectResponse(url=f"{SECRET_PATH}?message=Баннер+удалён", status_code=303)
 
 
-@app.post("/admin/banner/disable")
+@app.post(f"{SECRET_PATH}/banner/disable")
 def admin_disable_legacy_banner(request: Request):
     if not is_admin_authenticated(request):
         return JSONResponse({"error": "Admin access required"}, status_code=403)
@@ -508,10 +496,10 @@ def admin_disable_legacy_banner(request: Request):
         url=current_banner.get("url") or "",
         image_url=current_banner.get("image_url") or "",
     )
-    return RedirectResponse(url="/admin?message=Старый+баннер+отключён", status_code=303)
+    return RedirectResponse(url=f"{SECRET_PATH}?message=Старый+баннер+отключён", status_code=303)
 
 
-@app.post("/admin/banner/clear-legacy")
+@app.post(f"{SECRET_PATH}/banner/clear-legacy")
 def admin_clear_legacy_banner(request: Request):
     if not is_admin_authenticated(request):
         return JSONResponse({"error": "Admin access required"}, status_code=403)
@@ -532,7 +520,7 @@ def admin_clear_legacy_banner(request: Request):
         url="",
         image_url="",
     )
-    return RedirectResponse(url="/admin?message=Старый+баннер+очищен", status_code=303)
+    return RedirectResponse(url=f"{SECRET_PATH}?message=Старый+баннер+очищен", status_code=303)
 
 
 @app.get("/api/profile")
@@ -624,7 +612,7 @@ async def websocket_chat(websocket: WebSocket):
         chat_manager.disconnect(websocket)
 
 
-@app.post("/admin/banner/update")
+@app.post(f"{SECRET_PATH}/banner/update")
 async def admin_update_banner(
     request: Request,
     title: str = Form("Промо"),
@@ -680,10 +668,10 @@ async def admin_update_banner(
         db.commit()
         db.close()
 
-    return RedirectResponse(url="/admin?message=Баннер+обновлён", status_code=303)
+    return RedirectResponse(url=f"{SECRET_PATH}?message=Баннер+обновлён", status_code=303)
 
 
-@app.post("/admin/banner/clear-image")
+@app.post(f"{SECRET_PATH}/banner/clear-image")
 def admin_clear_banner_image(request: Request):
     if not is_admin_authenticated(request):
         return JSONResponse({"error": "Admin access required"}, status_code=403)
@@ -704,27 +692,27 @@ def admin_clear_banner_image(request: Request):
         url=current_banner.get("url", ""),
         image_url="",
     )
-    return RedirectResponse(url="/admin?message=Картинка+удалена", status_code=303)
+    return RedirectResponse(url=f"{SECRET_PATH}?message=Картинка+удалена", status_code=303)
 
 
-@app.post("/admin/chat/clear")
+@app.post(f"{SECRET_PATH}/chat/clear")
 async def admin_clear_chat(request: Request):
     if not is_admin_authenticated(request):
         return JSONResponse({"error": "Admin access required"}, status_code=403)
 
     clear_chat_messages_db()
     await chat_manager.broadcast({"type": "clear"})
-    return RedirectResponse(url="/admin?message=Чат+очищен", status_code=303)
+    return RedirectResponse(url=f"{SECRET_PATH}?message=Чат+очищен", status_code=303)
 
 
-@app.post("/admin/chat/delete")
+@app.post(f"{SECRET_PATH}/chat/delete")
 async def admin_delete_chat_message(request: Request, msg_id: int = Form(...)):
     if not is_admin_authenticated(request):
         return JSONResponse({"error": "Admin access required"}, status_code=403)
 
     delete_chat_message_db(msg_id)
     await chat_manager.broadcast({"type": "delete", "id": msg_id})
-    return RedirectResponse(url="/admin?message=Сообщение+удалено", status_code=303)
+    return RedirectResponse(url=f"{SECRET_PATH}?message=Сообщение+удалено", status_code=303)
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -1243,8 +1231,6 @@ def home_page(request: Request, error: str = None):
             <div class="drawer-cap">Навигация</div>
             <a href="/" class="drawer-link" onclick="closeDrawer()">Главная</a>
             {drawer_links}
-            <div class="drawer-cap">Система</div>
-            <a href="/admin" class="drawer-link drawer-dim">Админ-панель</a>
         </aside>
 
         <div class="shell">
