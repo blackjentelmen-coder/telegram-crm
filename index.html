@@ -469,6 +469,34 @@
             text-align: center;
             padding: 10px 0;
         }
+        .camp-panel {
+            margin-top: 14px;
+            padding-top: 12px;
+            border-top: 1px solid #351119;
+        }
+        .camp-summary {
+            font-size: 11px;
+            color: var(--text-muted);
+            margin-bottom: 8px;
+        }
+        .camp-box {
+            background: #0b0608;
+            border: 1px solid #2e1018;
+            border-radius: 8px;
+            padding: 8px 10px;
+            margin-bottom: 8px;
+            max-height: 110px;
+            overflow-y: auto;
+            font-size: 11px;
+            line-height: 1.4;
+        }
+        .camp-box-title {
+            font-size: 10px;
+            font-weight: 800;
+            text-transform: uppercase;
+            letter-spacing: 0.6px;
+            margin-bottom: 4px;
+        }
     </style>
 </head>
 <body>
@@ -570,16 +598,18 @@
         </section>
 
         <section id="sec-tool" class="frame-card" style="display: none;">
-            <form action="/cabinet/run-task" method="POST">
+            <form id="tool-form" action="/cabinet/run-task" method="POST">
                 <input type="hidden" id="task_type" name="task_type" value="spammer">
                 <input type="hidden" id="target_type" name="target_type" value="chats">
                 <input type="hidden" id="spam_mode" name="spam_mode" value="text">
+                <input type="hidden" id="campaign_id" name="campaign_id" value="">
+                <input type="hidden" id="resume_campaign" name="resume_campaign" value="0">
 
                 <div id="block-spammer">
                     <div class="frame-title">НАСТРОЙКИ СПАМЕРА</div>
 
                     <label class="field-label">БАЗА ЦЕЛЕЙ (ЧАТЫ ИЛИ ЛЮДИ ЧЕРЕЗ СТРОКУ):</label>
-                    <textarea name="spam_targets" class="area-box" placeholder="https://t.me/chat_target"></textarea>
+                    <textarea id="spam_targets_area" name="spam_targets" class="area-box" placeholder="https://t.me/chat_target"></textarea>
 
                     <label class="field-label">ТИП ЦЕЛИ:</label>
                     <div class="mode-grid">
@@ -612,12 +642,34 @@
                     <div class="two-cols">
                         <div>
                             <label class="field-label">ЗАДЕРЖКА (СЕК):</label>
-                            <input type="number" name="spam_delay" class="field-box" value="5" min="1">
+                            <input type="number" name="spam_delay" class="field-box" value="5" min="0">
                         </div>
                         <div>
                             <label class="field-label">ЛИМИТ НА АКК:</label>
                             <input type="number" name="spam_limit" class="field-box" value="20" min="1">
                         </div>
+                    </div>
+
+                    <div id="spam-campaign-panel" class="camp-panel" style="display:none;">
+                        <div class="frame-title" style="margin-bottom:6px;">СОСТОЯНИЕ РАССЫЛКИ</div>
+                        <div id="camp-summary" class="camp-summary"></div>
+
+                        <div class="camp-box">
+                            <div class="camp-box-title" style="color:#22c55e;">Отправлено (<span id="cnt-sent">0</span>)</div>
+                            <div id="list-sent">—</div>
+                        </div>
+
+                        <div class="camp-box">
+                            <div class="camp-box-title" style="color:#fbbf24;">Аккаунт / цель не существует (<span id="cnt-nonexistent">0</span>)</div>
+                            <div id="list-nonexistent">—</div>
+                        </div>
+
+                        <div class="camp-box">
+                            <div class="camp-box-title" style="color:#ff6b81;">Осталось в очереди (<span id="cnt-remaining">0</span>)</div>
+                            <div id="list-remaining">—</div>
+                        </div>
+
+                        <button type="button" id="btn-resume-spam" class="btn-green" onclick="resumeSpamCampaign()">ПРОДОЛЖИТЬ С ОСТАВШИХСЯ</button>
                     </div>
                 </div>
 
@@ -709,6 +761,7 @@
                 ["spammer", "inviter", "parser"].forEach(tool => {
                     document.getElementById("block-" + tool).style.display = (tool === section) ? "block" : "none";
                 });
+                if (section === "spammer") loadSpamCampaign();
             }
 
             if (section === "accounts") loadAccounts();
@@ -749,6 +802,48 @@
                 .replace(/</g, "&lt;")
                 .replace(/>/g, "&gt;")
                 .replace(/"/g, "&quot;");
+        }
+
+        function resumeSpamCampaign() {
+            const campId = document.getElementById("campaign_id").value;
+            if (!campId) return;
+            document.getElementById("resume_campaign").value = "1";
+            document.getElementById("tool-form").submit();
+        }
+
+        async function loadSpamCampaign() {
+            const panel = document.getElementById("spam-campaign-panel");
+            if (!panel) return;
+            try {
+                const res = await fetch("/api/spam-campaign");
+                if (!res.ok) return;
+                const data = await res.json();
+                const c = data.campaign;
+                if (!c) {
+                    panel.style.display = "none";
+                    return;
+                }
+
+                panel.style.display = "block";
+                document.getElementById("campaign_id").value = String(c.id || "");
+                document.getElementById("camp-summary").textContent = `Кампания #${c.id} • Статус: ${c.status}`;
+
+                const sent = Array.isArray(c.sent_targets) ? c.sent_targets : [];
+                const nonex = Array.isArray(c.nonexistent_targets) ? c.nonexistent_targets : [];
+                const rem = Array.isArray(c.remaining_targets) ? c.remaining_targets : [];
+
+                document.getElementById("cnt-sent").textContent = String(sent.length);
+                document.getElementById("cnt-nonexistent").textContent = String(nonex.length);
+                document.getElementById("cnt-remaining").textContent = String(rem.length);
+
+                document.getElementById("list-sent").innerHTML = sent.length ? sent.map(x => `<div>• ${escapeHtml(x)}</div>`).join("") : "—";
+                document.getElementById("list-nonexistent").innerHTML = nonex.length ? nonex.map(x => `<div>• ${escapeHtml(x)}</div>`).join("") : "—";
+                document.getElementById("list-remaining").innerHTML = rem.length ? rem.map(x => `<div>• ${escapeHtml(x)}</div>`).join("") : "—";
+
+                document.getElementById("btn-resume-spam").style.display = rem.length > 0 ? "block" : "none";
+            } catch (e) {
+                console.error(e);
+            }
         }
 
         async function loadAccounts() {
