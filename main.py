@@ -1926,7 +1926,7 @@ async def start_qr_auth(request: Request):
     try:
         qr = await client.qr_login()
         session_id = uuid.uuid4().hex
-        qr_sessions[session_id] = {"client": client, "qr": qr, "owner_key": client_key}
+        qr_sessions[session_id] = {"client": client, "qr": qr, "owner_key": client_key, "created_at": time.time()}
 
         img = qrcode.make(qr.url)
         buffered = io.BytesIO()
@@ -1940,7 +1940,6 @@ async def start_qr_auth(request: Request):
             <meta charset="UTF-8">
             <meta name="viewport" content="width=device-width, initial-scale=1.0">
             <title>GHOSTCORE | QR Авторизация</title>
-            <meta http-equiv="refresh" content="5">
             <style>
                 :root {{
                     --bg-color: #050507;
@@ -2043,46 +2042,82 @@ async def start_qr_auth(request: Request):
 @app.get("/cabinet/check-qr", response_class=HTMLResponse)
 async def check_qr_auth(request: Request, sid: str):
     client_key = get_session_key_from_request(request)
-    if not get_authorized_client(client_key) or sid not in qr_sessions:
-        return RedirectResponse(url="/cabinet", status_code=303)
+    if not get_authorized_client(client_key):
+        return RedirectResponse(url="/", status_code=303)
+
+    if sid not in qr_sessions:
+        msg = urllib.parse.quote("QR-сессия истекла или сервер перезапускался. Откройте QR заново.")
+        return RedirectResponse(url=f"/cabinet?message={msg}#accounts", status_code=303)
 
     data = qr_sessions[sid]
     if data.get("owner_key") != client_key:
-        return RedirectResponse(url="/cabinet", status_code=303)
+        return RedirectResponse(url="/cabinet#accounts", status_code=303)
 
     client = data["client"]
     qr = data["qr"]
 
     try:
-        await qr.wait(timeout=8)
+        if not client.is_connected():
+            await client.connect()
+
+        authorized = await client.is_user_authorized()
+        if not authorized:
+            try:
+                await asyncio.wait_for(qr.wait(), timeout=4)
+            except asyncio.TimeoutError:
+                authorized = await client.is_user_authorized()
+            else:
+                authorized = True
+
+        if not authorized:
+            msg = urllib.parse.quote("Вход по QR ещё не подтверждён в Telegram. Подтвердите вход и нажмите «Проверить вход».")
+            return RedirectResponse(url=f"/cabinet?message={msg}#accounts", status_code=303)
+
         me = await client.get_me()
         phone_str = f"+{me.phone}" if me and me.phone else "QR-Аккаунт"
-
-        final_session_str = encrypt_secret(client.session.save())
-        await client.disconnect()
-        del qr_sessions[sid]
+        raw_session = client.session.save()
+        final_session_str = encrypt_secret(raw_session)
 
         db = get_db()
         cursor = db.cursor()
-        cursor.execute(
-            """
-            INSERT INTO client_tg_accounts (client_key, phone, session_string, status, status_reason, checked_at)
-            VALUES (?, ?, ?, ?, 'Сессия активна', ?)
-            """,
-            (client_key, phone_str, final_session_str, ACCOUNT_STATUS_ACTIVE, time.strftime("%Y-%m-%d %H:%M:%S")),
-        )
+        existing = cursor.execute(
+            "SELECT id FROM client_tg_accounts WHERE client_key = ? AND phone = ?",
+            (client_key, phone_str),
+        ).fetchone()
+        if existing:
+            cursor.execute(
+                """
+                UPDATE client_tg_accounts
+                SET session_string = ?, status = ?, status_reason = 'Сессия активна', checked_at = ?
+                WHERE id = ?
+                """,
+                (final_session_str, ACCOUNT_STATUS_ACTIVE, time.strftime("%Y-%m-%d %H:%M:%S"), existing["id"]),
+            )
+        else:
+            cursor.execute(
+                """
+                INSERT INTO client_tg_accounts (client_key, phone, session_string, status, status_reason, checked_at)
+                VALUES (?, ?, ?, ?, 'Сессия активна', ?)
+                """,
+                (client_key, phone_str, final_session_str, ACCOUNT_STATUS_ACTIVE, time.strftime("%Y-%m-%d %H:%M:%S")),
+            )
         db.commit()
         db.close()
 
+        qr_sessions.pop(sid, None)
+        try:
+            await client.disconnect()
+        except Exception:
+            pass
+
         log_ok(f"QR-аккаунт подключён: {phone_str}")
         notify_user_sync(client_key, f"Подключён новый TG-аккаунт по QR: {phone_str}")
-        return RedirectResponse(url="/cabinet?message=QR-код успешно сканирован!", status_code=303)
-    except asyncio.TimeoutError:
-        return RedirectResponse(url="/cabinet/start-qr", status_code=303)
+        msg = urllib.parse.quote(f"QR-код успешно сканирован! Аккаунт: {phone_str}")
+        return RedirectResponse(url=f"/cabinet?message={msg}#accounts", status_code=303)
     except Exception as e:
-        del qr_sessions[sid]
         log_err(f"Ошибка QR-входа: {e}")
-        return RedirectResponse(url=f"/cabinet?message=Ошибка QR: {str(e)}", status_code=303)
+        msg = urllib.parse.quote(f"Ошибка QR: {str(e)}")
+        return RedirectResponse(url=f"/cabinet?message={msg}#accounts", status_code=303)
 
 
 @app.post("/cabinet/add-account")
@@ -2401,4 +2436,3 @@ def logout_client():
     resp = RedirectResponse(url="/", status_code=303)
     resp.delete_cookie(key=CLIENT_COOKIE_NAME, path="/")
     return resp
-
