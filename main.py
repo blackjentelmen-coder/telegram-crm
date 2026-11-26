@@ -15,6 +15,15 @@ from fastapi.responses import HTMLResponse, RedirectResponse, FileResponse, JSON
 from fastapi.staticfiles import StaticFiles
 from telethon import TelegramClient
 from telethon.sessions import StringSession
+from telethon.errors import (
+    AuthKeyUnregisteredError,
+    AuthKeyDuplicatedError,
+    SessionRevokedError,
+    UserDeactivatedError,
+    UserDeactivatedBanError,
+    PeerFloodError,
+    FloodWaitError,
+)
 
 from database import (
     init_db,
@@ -28,7 +37,15 @@ from database import (
     clear_chat_messages_db,
     delete_chat_message_db,
     get_user_by_key,
+    set_tg_account_status,
+    add_site_notification,
+    get_site_notifications,
+    mark_notifications_read,
+    ACCOUNT_STATUS_ACTIVE,
+    ACCOUNT_STATUS_SPAM,
+    ACCOUNT_STATUS_SESSION_LOST,
 )
+from ghost_logger import log_ok, log_warn, log_err
 import admin
 
 import spammer
@@ -50,7 +67,83 @@ app.include_router(admin.router)
 qr_sessions = {}
 
 
-def notify_user_sync(client_key: str, message: str):
+def classify_tg_error(err: Exception):
+    if isinstance(
+        err,
+        (
+            AuthKeyUnregisteredError,
+            AuthKeyDuplicatedError,
+            SessionRevokedError,
+            UserDeactivatedError,
+            UserDeactivatedBanError,
+        ),
+    ):
+        return ACCOUNT_STATUS_SESSION_LOST, "Слетела или отозвана сессия"
+
+    if isinstance(err, (PeerFloodError, FloodWaitError)):
+        return ACCOUNT_STATUS_SPAM, "Спам-ограничение / флуд Telegram"
+
+    low = str(err).lower()
+    if any(k in low for k in ("auth_key_unregistered", "session_revoked", "user_deactivated", "not authorized")):
+        return ACCOUNT_STATUS_SESSION_LOST, "Слетела сессия"
+    if any(k in low for k in ("peer_flood", "floodwait", "spam", "too many requests")):
+        return ACCOUNT_STATUS_SPAM, "Спам-ограничение"
+
+    return None, str(err)[:160]
+
+
+async def check_and_sync_account(acc_row: dict, client_key: str) -> dict:
+    acc_id = acc_row["id"]
+    phone = acc_row.get("phone") or f"#{acc_id}"
+    session_str = acc_row.get("session_string") or ""
+
+    if not session_str:
+        set_tg_account_status(acc_id, ACCOUNT_STATUS_SESSION_LOST, "Пустая строка сессии")
+        log_warn(f"Аккаунт {phone}: сессия пуста -> {ACCOUNT_STATUS_SESSION_LOST}")
+        return {**acc_row, "status": ACCOUNT_STATUS_SESSION_LOST, "status_reason": "Пустая строка сессии", "client": None}
+
+    client = TelegramClient(StringSession(session_str), API_ID, API_HASH)
+    try:
+        await client.connect()
+        if not await client.is_user_authorized():
+            await client.disconnect()
+            set_tg_account_status(acc_id, ACCOUNT_STATUS_SESSION_LOST, "Сессия не авторизована")
+            add_site_notification(
+                client_key,
+                "Слетела сессия",
+                f"Аккаунт {phone} потерял авторизацию.",
+                level="error",
+            )
+            log_warn(f"Аккаунт {phone}: не авторизован -> {ACCOUNT_STATUS_SESSION_LOST}")
+            return {**acc_row, "status": ACCOUNT_STATUS_SESSION_LOST, "status_reason": "Сессия не авторизована", "client": None}
+
+        set_tg_account_status(acc_id, ACCOUNT_STATUS_ACTIVE, "Сессия активна")
+        log_ok(f"Аккаунт {phone}: {ACCOUNT_STATUS_ACTIVE}")
+        return {**acc_row, "status": ACCOUNT_STATUS_ACTIVE, "status_reason": "Сессия активна", "client": client}
+
+    except Exception as e:
+        try:
+            await client.disconnect()
+        except Exception:
+            pass
+        mapped_status, reason = classify_tg_error(e)
+        if mapped_status:
+            set_tg_account_status(acc_id, mapped_status, reason)
+            add_site_notification(
+                client_key,
+                mapped_status,
+                f"Аккаунт {phone}: {reason}",
+                level="error",
+            )
+            log_warn(f"Аккаунт {phone}: {reason} -> {mapped_status}")
+            return {**acc_row, "status": mapped_status, "status_reason": reason, "client": None}
+
+        log_err(f"Аккаунт {phone}: ошибка проверки ({reason})")
+        return {**acc_row, "status_reason": reason, "client": None}
+
+
+def notify_user_sync(client_key: str, message: str, level: str = "info"):
+    add_site_notification(client_key, "GHOSTCORE", message, level=level)
     if not BOT_TOKEN:
         return
     user = get_user_by_key(client_key)
@@ -67,7 +160,7 @@ def notify_user_sync(client_key: str, message: str):
         with urllib.request.urlopen(req, timeout=5) as resp:
             resp.read()
     except Exception as e:
-        print(f"⚠️ Не удалось отправить уведомление в бот: {e}")
+        log_err(f"Уведомление в бот не отправлено: {e}")
 
 
 def init_banners_table():
@@ -238,6 +331,72 @@ def api_home_data(request: Request):
         "is_muted": bool(user and user.get("is_muted")),
         "is_paid": bool(user and user.get("is_paid")),
     })
+
+
+@app.get("/api/accounts")
+def api_get_accounts(request: Request):
+    client_key = request.cookies.get("client_session")
+    user = get_authorized_client(client_key)
+    if not user:
+        return JSONResponse({"authenticated": False, "accounts": []}, status_code=401)
+    db = get_db()
+    rows = db.execute(
+        """
+        SELECT id, phone, status, status_reason, checked_at
+        FROM client_tg_accounts
+        WHERE client_key = ?
+        ORDER BY id DESC
+        """,
+        (client_key.strip().upper(),),
+    ).fetchall()
+    db.close()
+    return JSONResponse({"authenticated": True, "accounts": [dict(r) for r in rows]})
+
+
+@app.post("/cabinet/check-account")
+async def check_single_account(request: Request, acc_id: int = Form(...)):
+    client_key = request.cookies.get("client_session")
+    if not get_authorized_client(client_key):
+        return RedirectResponse(url="/", status_code=303)
+
+    db = get_db()
+    row = db.execute(
+        "SELECT * FROM client_tg_accounts WHERE id = ? AND client_key = ?",
+        (acc_id, client_key.strip().upper()),
+    ).fetchone()
+    db.close()
+
+    if not row:
+        return RedirectResponse(url="/cabinet?message=Аккаунт не найден", status_code=303)
+
+    checked = await check_and_sync_account(dict(row), client_key)
+    if checked.get("client"):
+        try:
+            await checked["client"].disconnect()
+        except Exception:
+            pass
+
+    status_label = checked.get("status") or "Неизвестно"
+    reason_part = f" ({checked['status_reason']})" if checked.get("status_reason") else ""
+    msg = urllib.parse.quote(f"Статус аккаунта: {status_label}{reason_part}")
+    return RedirectResponse(url=f"/cabinet?message={msg}", status_code=303)
+
+
+@app.get("/api/notifications")
+def api_get_notifications(request: Request):
+    client_key = request.cookies.get("client_session")
+    if not get_authorized_client(client_key):
+        return JSONResponse({"notifications": []}, status_code=401)
+    return JSONResponse({"notifications": get_site_notifications(client_key)})
+
+
+@app.post("/api/notifications/read")
+def api_read_notifications(request: Request):
+    client_key = request.cookies.get("client_session")
+    if not get_authorized_client(client_key):
+        return JSONResponse({"ok": False}, status_code=401)
+    mark_notifications_read(client_key)
+    return JSONResponse({"ok": True})
 
 
 @app.get("/api/admin/banners")
@@ -448,7 +607,8 @@ async def websocket_chat(websocket: WebSocket):
             })
     except WebSocketDisconnect:
         chat_manager.disconnect(websocket)
-    except Exception:
+    except Exception as e:
+        log_warn(f"WebSocket чат отключён: {e}")
         chat_manager.disconnect(websocket)
 
 
@@ -1544,18 +1704,23 @@ async def check_qr_auth(request: Request, sid: str):
         db = get_db()
         cursor = db.cursor()
         cursor.execute(
-            "INSERT INTO client_tg_accounts (client_key, phone, session_string, status) VALUES (?, ?, ?, 'Активен')",
-            (client_key, phone_str, final_session_str),
+            """
+            INSERT INTO client_tg_accounts (client_key, phone, session_string, status, status_reason, checked_at)
+            VALUES (?, ?, ?, ?, 'Сессия активна', ?)
+            """,
+            (client_key, phone_str, final_session_str, ACCOUNT_STATUS_ACTIVE, time.strftime("%Y-%m-%d %H:%M:%S")),
         )
         db.commit()
         db.close()
 
+        log_ok(f"QR-аккаунт подключён: {phone_str}")
         notify_user_sync(client_key, f"Подключён новый TG-аккаунт по QR: {phone_str}")
         return RedirectResponse(url="/cabinet?message=QR-код успешно сканирован!", status_code=303)
     except asyncio.TimeoutError:
         return RedirectResponse(url="/cabinet/start-qr", status_code=303)
     except Exception as e:
         del qr_sessions[sid]
+        log_err(f"Ошибка QR-входа: {e}")
         return RedirectResponse(url=f"/cabinet?message=Ошибка QR: {str(e)}", status_code=303)
 
 
@@ -1578,15 +1743,20 @@ async def add_client_account(request: Request, phone: str = Form(...)):
         db = get_db()
         cursor = db.cursor()
         cursor.execute(
-            "INSERT INTO client_tg_accounts (client_key, phone, session_string, phone_code_hash, status) VALUES (?, ?, ?, ?, 'Ожидает код')",
+            """
+            INSERT INTO client_tg_accounts (client_key, phone, session_string, phone_code_hash, status, status_reason)
+            VALUES (?, ?, ?, ?, 'Ожидает код', 'Ожидание кода подтверждения')
+            """,
             (client_key, clean_phone, session_str, phone_code_hash),
         )
         db.commit()
         db.close()
 
+        log_ok(f"Запрошен код для {clean_phone}")
         return RedirectResponse(url="/cabinet?message=Код отправлен!", status_code=303)
     except Exception as e:
         await client.disconnect()
+        log_err(f"Ошибка запроса кода для {clean_phone}: {e}")
         return RedirectResponse(url=f"/cabinet?message=Ошибка запроса кода: {str(e)}", status_code=303)
 
 
@@ -1616,16 +1786,22 @@ async def verify_client_code(request: Request, acc_id: int = Form(...), code: st
         db = get_db()
         cursor = db.cursor()
         cursor.execute(
-            "UPDATE client_tg_accounts SET session_string = ?, status = 'Активен' WHERE id = ?",
-            (final_session_str, acc_id),
+            """
+            UPDATE client_tg_accounts
+            SET session_string = ?, status = ?, status_reason = 'Сессия активна', checked_at = ?
+            WHERE id = ?
+            """,
+            (final_session_str, ACCOUNT_STATUS_ACTIVE, time.strftime("%Y-%m-%d %H:%M:%S"), acc_id),
         )
         db.commit()
         db.close()
 
+        log_ok(f"Аккаунт {acc['phone']} авторизован ({ACCOUNT_STATUS_ACTIVE})")
         notify_user_sync(client_key, f"TG-аккаунт {acc['phone']} успешно авторизован в кабинете.")
         return RedirectResponse(url="/cabinet?message=Аккаунт успешно авторизован!", status_code=303)
     except Exception as e:
         await client.disconnect()
+        log_err(f"Ошибка входа по коду {acc['phone']}: {e}")
         return RedirectResponse(url=f"/cabinet?message=Ошибка авторизации: {str(e)}", status_code=303)
 
 
@@ -1659,21 +1835,20 @@ async def run_client_task(request: Request):
 
     db = get_db()
     cursor = db.cursor()
-    cursor.execute("SELECT * FROM client_tg_accounts WHERE client_key = ? AND status = 'Активен'", (client_key,))
-    active_accs = cursor.fetchall()
+    cursor.execute(
+        "SELECT * FROM client_tg_accounts WHERE client_key = ? AND status = ?",
+        (client_key, ACCOUNT_STATUS_ACTIVE),
+    )
+    active_accs = [dict(r) for r in cursor.fetchall()]
 
     if not active_accs:
         res_text = "Ошибка: Нет активных авторизованных аккаунтов!"
     else:
         clients = []
         for acc in active_accs:
-            try:
-                client = TelegramClient(StringSession(acc["session_string"]), API_ID, API_HASH)
-                await client.connect()
-                if await client.is_user_authorized():
-                    clients.append(client)
-            except Exception as e:
-                print(f"⚠️ Ошибка инициализации клиента {acc['phone']}: {e}")
+            checked = await check_and_sync_account(acc, client_key)
+            if checked.get("client"):
+                clients.append(checked["client"])
 
         if not clients:
             res_text = "Ошибка: Ни один из сохраненных аккаунтов не авторизован в Telegram!"
@@ -1702,6 +1877,10 @@ async def run_client_task(request: Request):
                         limit_per_account=limit_per_account,
                         delay_sec=delay_sec,
                     )
+                    if res.get("flood_wait", 0) > 0:
+                        for acc in active_accs:
+                            set_tg_account_status(acc["id"], ACCOUNT_STATUS_SPAM, "Словлен FloodWait при рассылке")
+                            log_warn(f"Аккаунт {acc['phone']}: FloodWait -> {ACCOUNT_STATUS_SPAM}")
                     res_text = f"Спамер завершен. Успешно: {res.get('success', 0)}, Ошибок: {res.get('failed', 0)}, FloodWait: {res.get('flood_wait', 0)}"
 
                 elif task_type == "inviter":
@@ -1725,6 +1904,10 @@ async def run_client_task(request: Request):
                         delay_min=delay_min,
                         delay_max=delay_max,
                     )
+                    if res.get("flood_wait", 0) > 0:
+                        for acc in active_accs:
+                            set_tg_account_status(acc["id"], ACCOUNT_STATUS_SPAM, "Словлен FloodWait при инвайте")
+                            log_warn(f"Аккаунт {acc['phone']}: FloodWait -> {ACCOUNT_STATUS_SPAM}")
                     res_text = f"Инвайтер завершен. Добавлено: {res.get('success', 0)}, Ошибок: {res.get('failed', 0)}, FloodWait: {res.get('flood_wait', 0)}"
 
                 elif task_type == "parser":
@@ -1745,6 +1928,11 @@ async def run_client_task(request: Request):
                     res_text = f"Неизвестный тип задачи: {task_type}"
 
             except Exception as e:
+                mapped_status, reason = classify_tg_error(e)
+                if mapped_status:
+                    for acc in active_accs:
+                        set_tg_account_status(acc["id"], mapped_status, reason)
+                log_err(f"Задача {task_type}: {e}")
                 res_text = f"Ошибка выполнения задачи: {str(e)}"
 
             for client in clients:
@@ -1760,6 +1948,7 @@ async def run_client_task(request: Request):
     db.commit()
     db.close()
 
+    log_ok(f"Задача {task_type} завершена: {res_text}")
     notify_user_sync(client_key, f"Задача ({task_type}): {res_text}")
     return RedirectResponse(url="/cabinet?message=Задача обработана!", status_code=303)
 
