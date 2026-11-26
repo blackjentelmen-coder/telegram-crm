@@ -7,20 +7,29 @@ from database import (
     get_db,
     get_recent_chat_messages,
 )
+from security import (
+    verify_admin_credentials,
+    sign_value,
+    verify_signed_value,
+    check_rate_limit,
+    record_failed_attempt,
+    clear_failed_attempts,
+    get_client_ip,
+)
 
 router = APIRouter()
 
-ADMIN_LOGIN = os.getenv("GHOSTCORE_ADMIN_LOGIN", "admin")
-ADMIN_PASSWORD = os.getenv("GHOSTCORE_ADMIN_PASSWORD", "ghostcore123")
 ADMIN_COOKIE_NAME = "admin_session"
-ADMIN_COOKIE_VALUE = "ghostcore_admin_authenticated"
+ADMIN_COOKIE_PAYLOAD = "ghostcore_admin_v1"
+IS_HTTPS = os.getenv("GHOSTCORE_HTTPS", "0").lower() in ("1", "true", "yes")
 
 RAW_SECRET_PATH = (os.getenv("GHOSTCORE_ADMIN_PATH", "ghost_sys_73m9q2x") or "ghost_sys_73m9q2x").strip().strip("/")
 SECRET_ADMIN_PATH = f"/{RAW_SECRET_PATH}" if RAW_SECRET_PATH else "/ghost_sys_73m9q2x"
 
 
 def is_admin_logged_in(request: Request) -> bool:
-    return request.cookies.get(ADMIN_COOKIE_NAME) == ADMIN_COOKIE_VALUE
+    raw_cookie = request.cookies.get(ADMIN_COOKIE_NAME)
+    return verify_signed_value(raw_cookie) == ADMIN_COOKIE_PAYLOAD
 
 
 def ensure_admin_schema():
@@ -259,11 +268,30 @@ def legacy_admin_blocked():
 
 
 @router.post(f"{SECRET_ADMIN_PATH}/login")
-def admin_login_submit(login: str = Form(...), password: str = Form(...)):
-    if login.strip() == ADMIN_LOGIN and password == ADMIN_PASSWORD:
+def admin_login_submit(request: Request, login: str = Form(...), password: str = Form(...)):
+    ip = get_client_ip(request.headers, request.client.host if request.client else None)
+    bucket = f"admin_login:{ip}"
+    allowed, wait_sec = check_rate_limit(bucket)
+    if not allowed:
+        return HTMLResponse(
+            content=render_admin_login(f"Слишком много попыток. Повторите через {wait_sec} сек."),
+            status_code=429,
+        )
+
+    if verify_admin_credentials(login, password):
+        clear_failed_attempts(bucket)
         resp = RedirectResponse(url=f"{SECRET_ADMIN_PATH}?message=Вход+выполнен", status_code=303)
-        resp.set_cookie(key=ADMIN_COOKIE_NAME, value=ADMIN_COOKIE_VALUE, httponly=True, path="/")
+        resp.set_cookie(
+            key=ADMIN_COOKIE_NAME,
+            value=sign_value(ADMIN_COOKIE_PAYLOAD),
+            httponly=True,
+            samesite="lax",
+            secure=IS_HTTPS,
+            path="/",
+        )
         return resp
+
+    record_failed_attempt(bucket)
     return HTMLResponse(content=render_admin_login("Неверный логин или пароль"), status_code=401)
 
 
@@ -944,7 +972,7 @@ def admin_dashboard(request: Request, message: str = "", q: str = ""):
                             <input type="number" name="duration_sec" class="field" value="8" min="2" max="3600">
                         </div>
                         <div>
-                            <label class="lbl">Картинка</label>
+                            <label class="lbl">Картинка (до 3 МБ)</label>
                             <input type="file" name="image" class="field" accept="image/*">
                         </div>
                     </div>
