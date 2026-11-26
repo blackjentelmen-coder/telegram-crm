@@ -2283,6 +2283,9 @@ async def run_client_task(request: Request):
     form = await request.form()
     task_type = form.get("task_type")
 
+    raw_selected_ids = form.getlist("account_ids[]") or form.getlist("account_ids")
+    selected_ids = {int(x) for x in raw_selected_ids if str(x).strip().isdigit()}
+
     db = get_db()
     cursor = db.cursor()
     cursor.execute(
@@ -2290,9 +2293,11 @@ async def run_client_task(request: Request):
         (client_key, ACCOUNT_STATUS_ACTIVE),
     )
     active_accs = [dict(r) for r in cursor.fetchall()]
+    if selected_ids:
+        active_accs = [a for a in active_accs if int(a["id"]) in selected_ids]
 
     if not active_accs:
-        res_text = "Ошибка: Нет активных авторизованных аккаунтов!"
+        res_text = "Ошибка: Выбранные аккаунты неактивны или не найдены!" if selected_ids else "Ошибка: Нет активных авторизованных аккаунтов!"
     else:
         clients = []
         valid_meta = []
