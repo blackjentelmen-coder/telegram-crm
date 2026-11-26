@@ -1,3 +1,4 @@
+import json
 import sqlite3
 from datetime import datetime
 
@@ -80,6 +81,25 @@ def init_db():
     """)
 
     cursor.execute("""
+        CREATE TABLE IF NOT EXISTS spam_campaigns (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            client_key TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'in_progress',
+            target_type TEXT NOT NULL DEFAULT 'chats',
+            spam_mode TEXT NOT NULL DEFAULT 'text',
+            spam_order TEXT NOT NULL DEFAULT 'sequential',
+            delay_sec INTEGER NOT NULL DEFAULT 5,
+            limit_per_account INTEGER NOT NULL DEFAULT 20,
+            content_json TEXT NOT NULL DEFAULT '[]',
+            remaining_json TEXT NOT NULL DEFAULT '[]',
+            sent_json TEXT NOT NULL DEFAULT '[]',
+            nonexistent_json TEXT NOT NULL DEFAULT '[]',
+            failed_accounts_json TEXT NOT NULL DEFAULT '[]',
+            updated_at TEXT NOT NULL
+        )
+    """)
+
+    cursor.execute("""
         CREATE TABLE IF NOT EXISTS site_notifications (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             client_key TEXT NOT NULL,
@@ -121,6 +141,176 @@ def init_db():
 
 def ensure_bot_schema():
     init_db()
+
+
+def _decode_list(raw: str) -> list:
+    if not raw:
+        return []
+    try:
+        data = json.loads(raw)
+        return data if isinstance(data, list) else []
+    except Exception:
+        return []
+
+
+def _format_campaign(row) -> dict:
+    d = dict(row)
+    d["content_items"] = _decode_list(d.pop("content_json", "[]"))
+    d["remaining_targets"] = _decode_list(d.pop("remaining_json", "[]"))
+    d["sent_targets"] = _decode_list(d.pop("sent_json", "[]"))
+    d["nonexistent_targets"] = _decode_list(d.pop("nonexistent_json", "[]"))
+    d["failed_accounts"] = _decode_list(d.pop("failed_accounts_json", "[]"))
+    return d
+
+
+def create_or_update_spam_campaign(
+    client_key: str,
+    targets: list,
+    content_items: list,
+    target_type: str = "chats",
+    spam_mode: str = "text",
+    spam_order: str = "sequential",
+    delay_sec: int = 5,
+    limit_per_account: int = 20,
+    campaign_id: int = None,
+) -> dict:
+    init_db()
+    clean_key = (client_key or "").strip().upper()
+    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    conn = get_db()
+
+    if campaign_id:
+        row = conn.execute(
+            "SELECT * FROM spam_campaigns WHERE id = ? AND client_key = ?",
+            (int(campaign_id), clean_key),
+        ).fetchone()
+        if row:
+            existing_rem = _decode_list(row["remaining_json"])
+            new_rem = [t.strip() for t in (targets or []) if t and t.strip()]
+            merged_rem = existing_rem + [t for t in new_rem if t not in existing_rem]
+            merged_content = content_items if content_items else _decode_list(row["content_json"])
+            conn.execute(
+                """
+                UPDATE spam_campaigns
+                SET status = 'in_progress',
+                    target_type = ?,
+                    spam_mode = ?,
+                    spam_order = ?,
+                    delay_sec = ?,
+                    limit_per_account = ?,
+                    content_json = ?,
+                    remaining_json = ?,
+                    updated_at = ?
+                WHERE id = ?
+                """,
+                (
+                    target_type,
+                    spam_mode,
+                    spam_order,
+                    int(delay_sec),
+                    int(limit_per_account),
+                    json.dumps(merged_content, ensure_ascii=False),
+                    json.dumps(merged_rem, ensure_ascii=False),
+                    now_str,
+                    int(campaign_id),
+                ),
+            )
+            conn.commit()
+            updated = conn.execute("SELECT * FROM spam_campaigns WHERE id = ?", (int(campaign_id),)).fetchone()
+            conn.close()
+            return _format_campaign(updated)
+
+    clean_targets = [t.strip() for t in (targets or []) if t and t.strip()]
+    cur = conn.cursor()
+    cur.execute(
+        """
+        INSERT INTO spam_campaigns (
+            client_key, status, target_type, spam_mode, spam_order,
+            delay_sec, limit_per_account, content_json, remaining_json,
+            sent_json, nonexistent_json, failed_accounts_json, updated_at
+        )
+        VALUES (?, 'in_progress', ?, ?, ?, ?, ?, ?, ?, '[]', '[]', '[]', ?)
+        """,
+        (
+            clean_key,
+            target_type,
+            spam_mode,
+            spam_order,
+            int(delay_sec),
+            int(limit_per_account),
+            json.dumps(content_items or [], ensure_ascii=False),
+            json.dumps(clean_targets, ensure_ascii=False),
+            now_str,
+        ),
+    )
+    new_id = cur.lastrowid
+    conn.commit()
+    created = conn.execute("SELECT * FROM spam_campaigns WHERE id = ?", (new_id,)).fetchone()
+    conn.close()
+    return _format_campaign(created)
+
+
+def save_spam_campaign_progress(
+    campaign_id: int,
+    remaining_targets: list,
+    sent_targets: list,
+    nonexistent_targets: list,
+    failed_accounts: list,
+    status: str = None,
+) -> dict:
+    init_db()
+    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    final_status = status or ("completed" if not remaining_targets else "paused")
+    conn = get_db()
+    conn.execute(
+        """
+        UPDATE spam_campaigns
+        SET status = ?,
+            remaining_json = ?,
+            sent_json = ?,
+            nonexistent_json = ?,
+            failed_accounts_json = ?,
+            updated_at = ?
+        WHERE id = ?
+        """,
+        (
+            final_status,
+            json.dumps(remaining_targets, ensure_ascii=False),
+            json.dumps(sent_targets, ensure_ascii=False),
+            json.dumps(nonexistent_targets, ensure_ascii=False),
+            json.dumps(failed_accounts, ensure_ascii=False),
+            now_str,
+            int(campaign_id),
+        ),
+    )
+    conn.commit()
+    row = conn.execute("SELECT * FROM spam_campaigns WHERE id = ?", (int(campaign_id),)).fetchone()
+    conn.close()
+    return _format_campaign(row) if row else {}
+
+
+def get_latest_spam_campaign(client_key: str):
+    init_db()
+    clean_key = (client_key or "").strip().upper()
+    conn = get_db()
+    row = conn.execute(
+        "SELECT * FROM spam_campaigns WHERE client_key = ? ORDER BY id DESC LIMIT 1",
+        (clean_key,),
+    ).fetchone()
+    conn.close()
+    return _format_campaign(row) if row else None
+
+
+def get_spam_campaign_by_id(campaign_id: int, client_key: str):
+    init_db()
+    clean_key = (client_key or "").strip().upper()
+    conn = get_db()
+    row = conn.execute(
+        "SELECT * FROM spam_campaigns WHERE id = ? AND client_key = ?",
+        (int(campaign_id), clean_key),
+    ).fetchone()
+    conn.close()
+    return _format_campaign(row) if row else None
 
 
 def set_tg_account_status(account_id: int, status: str, reason: str = ""):
