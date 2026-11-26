@@ -83,6 +83,25 @@ app.include_router(admin.router)
 
 qr_sessions = {}
 
+def _insert_client_tg_account(cursor, client_key: str, phone: str, session_string: str, phone_code_hash, status: str, status_reason: str, checked_at: str = ""):
+    cols = [r["name"] for r in cursor.execute("PRAGMA table_info(client_tg_accounts)").fetchall()]
+    base_map = {
+        "client_key": client_key,
+        "phone": phone,
+        "session_string": session_string,
+        "phone_code_hash": phone_code_hash,
+        "status": status,
+        "status_reason": status_reason,
+        "checked_at": checked_at,
+    }
+    if "session_name" in cols:
+        base_map["session_name"] = phone or f"tg_{int(time.time())}"
+    present = {k: v for k, v in base_map.items() if k in cols}
+    placeholders = ", ".join(["?"] * len(present))
+    col_names = ", ".join(present.keys())
+    cursor.execute(f"INSERT INTO client_tg_accounts ({col_names}) VALUES ({placeholders})", tuple(present.values()))
+
+
 import socks as _socks
 
 
@@ -2094,12 +2113,15 @@ async def check_qr_auth(request: Request, sid: str):
                 (final_session_str, ACCOUNT_STATUS_ACTIVE, time.strftime("%Y-%m-%d %H:%M:%S"), existing["id"]),
             )
         else:
-            cursor.execute(
-                """
-                INSERT INTO client_tg_accounts (client_key, phone, session_string, status, status_reason, checked_at)
-                VALUES (?, ?, ?, ?, 'Сессия активна', ?)
-                """,
-                (client_key, phone_str, final_session_str, ACCOUNT_STATUS_ACTIVE, time.strftime("%Y-%m-%d %H:%M:%S")),
+            _insert_client_tg_account(
+                cursor,
+                client_key=client_key,
+                phone=phone_str,
+                session_string=final_session_str,
+                phone_code_hash=None,
+                status=ACCOUNT_STATUS_ACTIVE,
+                status_reason="Сессия активна",
+                checked_at=time.strftime("%Y-%m-%d %H:%M:%S"),
             )
         db.commit()
         db.close()
@@ -2138,12 +2160,15 @@ async def add_client_account(request: Request, phone: str = Form(...)):
 
         db = get_db()
         cursor = db.cursor()
-        cursor.execute(
-            """
-            INSERT INTO client_tg_accounts (client_key, phone, session_string, phone_code_hash, status, status_reason)
-            VALUES (?, ?, ?, ?, 'Ожидает код', 'Ожидание кода подтверждения')
-            """,
-            (client_key, clean_phone, session_str, phone_code_hash),
+        _insert_client_tg_account(
+            cursor,
+            client_key=client_key,
+            phone=clean_phone,
+            session_string=session_str,
+            phone_code_hash=phone_code_hash,
+            status="Ожидает код",
+            status_reason="Ожидание кода подтверждения",
+            checked_at="",
         )
         db.commit()
         db.close()
