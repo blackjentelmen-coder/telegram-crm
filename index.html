@@ -860,6 +860,9 @@
                 box.innerHTML = list.map(acc => {
                     const st = acc.status || "Ожидает код";
                     const reason = acc.status_reason ? `<div class="acc-reason">${escapeHtml(acc.status_reason)}</div>` : "";
+                    const proxyInfo = acc.proxy_display
+                        ? `<div class="acc-reason" style="color:#86efac;">Прокси: ${escapeHtml(acc.proxy_display)}</div>`
+                        : `<div class="acc-reason">Прокси: не задан (напрямую)</div>`;
                     const codeForm = st === "Ожидает код"
                         ? `<form action="/cabinet/verify-code" method="POST" class="code-inline-form">
                                <input type="hidden" name="acc_id" value="${acc.id}">
@@ -867,6 +870,18 @@
                                <button type="submit" class="btn-mini">Подтвердить</button>
                            </form>`
                         : "";
+                    const proxyForm = `
+                        <form action="/cabinet/set-account-proxy" method="POST" class="code-inline-form">
+                            <input type="hidden" name="acc_id" value="${acc.id}">
+                            <input type="text" name="proxy_url" class="field-box" value="${escapeHtml(acc.proxy_raw || "")}" placeholder="socks5://user:pass@ip:port или ip:port:user:pass">
+                            <button type="submit" class="btn-mini">Прокси</button>
+                        </form>
+                        ${acc.proxy_raw ? `
+                        <form action="/cabinet/set-account-proxy" method="POST" style="margin-top:6px;">
+                            <input type="hidden" name="acc_id" value="${acc.id}">
+                            <input type="hidden" name="proxy_url" value="">
+                            <button type="submit" class="btn-mini">Снять прокси</button>
+                        </form>` : ""}`;
                     return `
                         <div class="acc-card">
                             <div class="acc-top">
@@ -874,7 +889,9 @@
                                 <span class="${badgeClass(st)}">${escapeHtml(st)}</span>
                             </div>
                             ${reason}
+                            ${proxyInfo}
                             ${codeForm}
+                            ${proxyForm}
                             <div class="acc-actions">
                                 <form action="/cabinet/check-account" method="POST" style="margin:0;">
                                     <input type="hidden" name="acc_id" value="${acc.id}">
