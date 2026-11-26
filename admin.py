@@ -55,6 +55,10 @@ def ensure_admin_schema():
         db.execute("ALTER TABLE access_keys ADD COLUMN admin_note TEXT NOT NULL DEFAULT ''")
     if "is_paid" not in cols:
         db.execute("ALTER TABLE access_keys ADD COLUMN is_paid INTEGER NOT NULL DEFAULT 0")
+    if "badge_label" not in cols:
+        db.execute("ALTER TABLE access_keys ADD COLUMN badge_label TEXT NOT NULL DEFAULT ''")
+    if "badge_style" not in cols:
+        db.execute("ALTER TABLE access_keys ADD COLUMN badge_style TEXT NOT NULL DEFAULT 'vip'")
     db.commit()
     db.close()
 
@@ -115,7 +119,7 @@ def fetch_users_with_messages(search_query: str = "") -> list:
             dict(r)
             for r in db.execute(
                 """
-                SELECT id, key_code, client_name, status, status_text, is_muted, admin_note, is_paid
+                SELECT id, key_code, client_name, status, status_text, is_muted, admin_note, is_paid, badge_label, badge_style
                 FROM access_keys
                 WHERE LOWER(COALESCE(client_name, '')) LIKE ? OR LOWER(COALESCE(key_code, '')) LIKE ?
                 ORDER BY id DESC
@@ -128,7 +132,7 @@ def fetch_users_with_messages(search_query: str = "") -> list:
             dict(r)
             for r in db.execute(
                 """
-                SELECT id, key_code, client_name, status, status_text, is_muted, admin_note, is_paid
+                SELECT id, key_code, client_name, status, status_text, is_muted, admin_note, is_paid, badge_label, badge_style
                 FROM access_keys
                 ORDER BY id DESC
                 """
@@ -420,6 +424,34 @@ def admin_save_user_note(request: Request, user_id: int = Form(...), admin_note:
     return RedirectResponse(url=f"{SECRET_ADMIN_PATH}?message=Заметка+сохранена#users", status_code=303)
 
 
+ALLOWED_ADMIN_BADGE_STYLES = {"vip", "staff", "mod", "tester", "pro", "alert"}
+
+
+@router.post(f"{SECRET_ADMIN_PATH}/users/badge")
+def admin_set_user_badge(
+    request: Request,
+    user_id: int = Form(...),
+    badge_label: str = Form(""),
+    badge_style: str = Form("vip"),
+):
+    if not is_admin_logged_in(request):
+        return RedirectResponse(url=SECRET_ADMIN_PATH, status_code=303)
+    ensure_admin_schema()
+    clean_label = (badge_label or "").strip()[:24]
+    clean_style = (badge_style or "vip").strip().lower()
+    if clean_style not in ALLOWED_ADMIN_BADGE_STYLES:
+        clean_style = "vip"
+
+    db = get_db()
+    db.execute(
+        "UPDATE access_keys SET badge_label = ?, badge_style = ? WHERE id = ?",
+        (clean_label, clean_style, int(user_id)),
+    )
+    db.commit()
+    db.close()
+    return RedirectResponse(url=f"{SECRET_ADMIN_PATH}?message=Бейдж+обновлён#users", status_code=303)
+
+
 @router.post(f"{SECRET_ADMIN_PATH}/users/delete")
 def admin_delete_user(request: Request, user_id: int = Form(...)):
     if not is_admin_logged_in(request):
@@ -449,6 +481,19 @@ def _render_user_card(u: dict) -> str:
     is_muted = int(u.get("is_muted") or 0) == 1
     is_paid = int(u.get("is_paid") or 0) == 1
     note_val = u.get("admin_note") or ""
+    badge_label = (u.get("badge_label") or "").strip()
+    badge_style = (u.get("badge_style") or "vip").lower()
+    badge_label_attr = badge_label.replace('"', "&quot;")
+
+    def _bopt(val: str, title: str) -> str:
+        sel = " selected" if badge_style == val else ""
+        return f'<option value="{val}"{sel}>{title}</option>'
+
+    custom_badge_html = (
+        f'<span class="badge badge-custom-{badge_style}">{badge_label}</span>'
+        if badge_label
+        else ""
+    )
 
     paid_badge = (
         '<span class="badge badge-paid">ОПЛАЧЕНО / VIP</span>'
@@ -496,6 +541,7 @@ def _render_user_card(u: dict) -> str:
                 <div class="u-key">Ключ: <code>{u_key}</code></div>
             </div>
             <div class="u-badges">
+                {custom_badge_html}
                 {paid_badge}
                 {ban_badge}
                 {mute_badge}
@@ -531,6 +577,20 @@ def _render_user_card(u: dict) -> str:
             <input type="hidden" name="user_id" value="{u["id"]}">
             <input type="text" name="admin_note" class="field-mini" value="{note_val}" placeholder="Заметка о пользователе...">
             <button type="submit" class="btn-sm btn-ghost">Сохранить</button>
+        </form>
+
+        <form action="{SECRET_ADMIN_PATH}/users/badge" method="POST" class="u-note-form">
+            <input type="hidden" name="user_id" value="{u["id"]}">
+            <input type="text" name="badge_label" class="field-mini" maxlength="24" value="{badge_label_attr}" placeholder="Бейдж (STAFF, VIP, MOD...)">
+            <select name="badge_style" class="field-mini" style="max-width:112px;">
+                {_bopt("vip", "VIP")}
+                {_bopt("staff", "STAFF")}
+                {_bopt("mod", "MOD")}
+                {_bopt("tester", "TESTER")}
+                {_bopt("pro", "PRO")}
+                {_bopt("alert", "ALERT")}
+            </select>
+            <button type="submit" class="btn-sm btn-paid">Бейдж</button>
         </form>
 
         <details class="u-details">
@@ -935,6 +995,12 @@ def admin_dashboard(request: Request, message: str = "", q: str = ""):
                 color: var(--muted);
                 border: 1px solid #352b30;
             }}
+            .badge-custom-vip {{ background: rgba(255, 30, 66, 0.18); color: #ff8fa3; border: 1px solid rgba(255, 30, 66, 0.5); }}
+            .badge-custom-staff {{ background: rgba(34, 197, 94, 0.18); color: #86efac; border: 1px solid rgba(34, 197, 94, 0.5); }}
+            .badge-custom-mod {{ background: rgba(56, 189, 248, 0.18); color: #7dd3fc; border: 1px solid rgba(56, 189, 248, 0.5); }}
+            .badge-custom-tester {{ background: rgba(168, 85, 247, 0.18); color: #d8b4fe; border: 1px solid rgba(168, 85, 247, 0.5); }}
+            .badge-custom-pro {{ background: rgba(245, 158, 11, 0.18); color: #fcd34d; border: 1px solid rgba(245, 158, 11, 0.5); }}
+            .badge-custom-alert {{ background: rgba(239, 68, 68, 0.22); color: #fca5a5; border: 1px solid rgba(239, 68, 68, 0.6); }}
             .b-text {{ font-size: 12px; color: #e4d4d8; margin-bottom: 4px; }}
             .b-url {{ font-size: 11px; color: var(--muted); word-break: break-all; margin-bottom: 6px; }}
             .mini-thumb {{
