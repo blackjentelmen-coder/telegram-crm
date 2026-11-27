@@ -930,10 +930,18 @@
                             <input type="hidden" name="proxy_url" value="">
                             <button type="submit" class="btn-mini">Снять прокси</button>
                         </form>` : ""}`;
+                    const canOpenTg = (st !== "Ожидает код" && st !== "Слетела сессия");
+                    const safePhone = escapeHtml(acc.phone).replace(/'/g, "\'");
+                    const openBtn = canOpenTg
+                        ? `<button type="button" class="btn-mini" style="border-color:rgba(56,189,248,0.55);color:#7dd3fc;" onclick="openTgViewer(${acc.id}, '${safePhone}')">💬 Открыть ТГ</button>`
+                        : "";
+                    const phoneHtml = canOpenTg
+                        ? `<span class="acc-phone" style="cursor:pointer;text-decoration:underline dotted #ff1e42;" onclick="openTgViewer(${acc.id}, '${safePhone}')">${escapeHtml(acc.phone)}</span>`
+                        : `<span class="acc-phone">${escapeHtml(acc.phone)}</span>`;
                     return `
                         <div class="acc-card">
                             <div class="acc-top">
-                                <span class="acc-phone">${escapeHtml(acc.phone)}</span>
+                                ${phoneHtml}
                                 <span class="${badgeClass(st)}">${escapeHtml(st)}</span>
                             </div>
                             ${reason}
@@ -941,6 +949,7 @@
                             ${codeForm}
                             ${proxyForm}
                             <div class="acc-actions">
+                                ${openBtn}
                                 <form action="/cabinet/check-account" method="POST" style="margin:0;">
                                     <input type="hidden" name="acc_id" value="${acc.id}">
                                     <button type="submit" class="btn-mini">Проверить</button>
@@ -1048,5 +1057,580 @@
 
         loadProfile();
     </script>
+
+        <style>
+            .tgv-mask {
+                position: fixed;
+                inset: 0;
+                background: rgba(2, 2, 5, 0.86);
+                backdrop-filter: blur(6px);
+                z-index: 200;
+                display: none;
+                align-items: flex-end;
+                justify-content: center;
+            }
+            .tgv-mask.open { display: flex; }
+            @media (min-width: 520px) {
+                .tgv-mask.open { align-items: center; padding: 16px; }
+            }
+            .tgv-sheet {
+                width: 100%;
+                max-width: 440px;
+                height: 92vh;
+                max-height: 780px;
+                background: #09070b;
+                border: 1.5px solid #4a121d;
+                border-bottom: none;
+                border-radius: 18px 18px 0 0;
+                box-shadow: 0 -8px 36px rgba(255, 30, 66, 0.25);
+                display: flex;
+                flex-direction: column;
+                overflow: hidden;
+                position: relative;
+                animation: tgvSlideUp 0.22s ease-out;
+            }
+            @media (min-width: 520px) {
+                .tgv-sheet {
+                    border-bottom: 1.5px solid #4a121d;
+                    border-radius: 16px;
+                }
+            }
+            @keyframes tgvSlideUp {
+                from { transform: translateY(28px); opacity: 0.4; }
+                to { transform: translateY(0); opacity: 1; }
+            }
+            .tgv-head {
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                gap: 8px;
+                padding: 12px 14px;
+                background: linear-gradient(180deg, #160a0f 0%, #0e080c 100%);
+                border-bottom: 1px solid #351119;
+                flex: 0 0 auto;
+            }
+            .tgv-head-left {
+                display: flex;
+                align-items: center;
+                gap: 10px;
+                min-width: 0;
+                flex: 1;
+            }
+            .tgv-icon-btn {
+                width: 34px;
+                height: 34px;
+                border-radius: 10px;
+                background: #1a0c12;
+                border: 1px solid #4a121d;
+                color: #f5f5f7;
+                font-size: 15px;
+                font-weight: 700;
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+                cursor: pointer;
+                flex: 0 0 auto;
+            }
+            .tgv-icon-btn:active { transform: scale(0.95); }
+            .tgv-title-wrap {
+                min-width: 0;
+                flex: 1;
+            }
+            .tgv-title {
+                font-size: 14px;
+                font-weight: 800;
+                color: #fff;
+                white-space: nowrap;
+                overflow: hidden;
+                text-overflow: ellipsis;
+            }
+            .tgv-sub {
+                font-size: 11px;
+                color: #9e969b;
+                white-space: nowrap;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                margin-top: 1px;
+            }
+            .tgv-screens {
+                position: relative;
+                flex: 1;
+                overflow: hidden;
+                display: flex;
+            }
+            .tgv-view {
+                position: absolute;
+                inset: 0;
+                display: flex;
+                flex-direction: column;
+                background: #09070b;
+                transition: transform 0.24s cubic-bezier(0.22, 1, 0.36, 1);
+            }
+            .tgv-view-dialogs { transform: translateX(0); }
+            .tgv-view-chat { transform: translateX(100%); }
+            .tgv-sheet.in-chat .tgv-view-dialogs { transform: translateX(-28%); }
+            .tgv-sheet.in-chat .tgv-view-chat { transform: translateX(0); }
+
+            .tgv-search-wrap {
+                padding: 10px 12px 6px 12px;
+                background: #0c080c;
+                flex: 0 0 auto;
+            }
+            .tgv-search {
+                width: 100%;
+                padding: 9px 12px;
+                border-radius: 10px;
+                background: #150c11;
+                border: 1px solid #351119;
+                color: #f5f5f7;
+                font-size: 13px;
+                outline: none;
+            }
+            .tgv-search:focus { border-color: #ff1e42; }
+            .tgv-tabs {
+                display: flex;
+                gap: 6px;
+                padding: 6px 12px 10px 12px;
+                border-bottom: 1px solid #260e15;
+                background: #0c080c;
+                flex: 0 0 auto;
+            }
+            .tgv-tab {
+                flex: 1;
+                padding: 6px 8px;
+                border-radius: 8px;
+                border: 1px solid #2e1018;
+                background: #13090e;
+                color: #9e969b;
+                font-size: 11px;
+                font-weight: 700;
+                cursor: pointer;
+                text-align: center;
+            }
+            .tgv-tab.active {
+                background: rgba(255, 30, 66, 0.18);
+                border-color: #ff1e42;
+                color: #fff;
+            }
+            .tgv-list {
+                flex: 1;
+                overflow-y: auto;
+                padding: 6px 8px 18px 8px;
+            }
+            .tgv-dialog {
+                display: flex;
+                align-items: center;
+                gap: 11px;
+                padding: 10px;
+                border-radius: 12px;
+                cursor: pointer;
+                transition: background 0.15s ease;
+                border: 1px solid transparent;
+            }
+            .tgv-dialog:hover, .tgv-dialog:active {
+                background: #150b10;
+                border-color: #2f1119;
+            }
+            .tgv-ava {
+                width: 44px;
+                height: 44px;
+                border-radius: 50%;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                font-size: 15px;
+                font-weight: 800;
+                color: #fff;
+                flex: 0 0 auto;
+                letter-spacing: 0.5px;
+                box-shadow: inset 0 0 10px rgba(0, 0, 0, 0.25);
+            }
+            .tgv-d-mid {
+                flex: 1;
+                min-width: 0;
+            }
+            .tgv-d-top {
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                gap: 6px;
+            }
+            .tgv-d-name {
+                font-size: 13.5px;
+                font-weight: 700;
+                color: #f5f5f7;
+                white-space: nowrap;
+                overflow: hidden;
+                text-overflow: ellipsis;
+            }
+            .tgv-d-time {
+                font-size: 10.5px;
+                color: #8c8288;
+                flex: 0 0 auto;
+            }
+            .tgv-d-bot {
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                gap: 6px;
+                margin-top: 3px;
+            }
+            .tgv-d-prev {
+                font-size: 12px;
+                color: #9e969b;
+                white-space: nowrap;
+                overflow: hidden;
+                text-overflow: ellipsis;
+            }
+            .tgv-unread {
+                background: #ff1e42;
+                color: #fff;
+                font-size: 10px;
+                font-weight: 800;
+                min-width: 20px;
+                height: 20px;
+                padding: 0 6px;
+                border-radius: 999px;
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+                flex: 0 0 auto;
+                box-shadow: 0 0 8px rgba(255, 30, 66, 0.45);
+            }
+            .tgv-msgs {
+                flex: 1;
+                overflow-y: auto;
+                padding: 12px 12px 16px 12px;
+                display: flex;
+                flex-direction: column;
+                gap: 7px;
+                background: radial-gradient(circle at top, #13080d 0%, #08060a 75%);
+            }
+            .tgv-date-pill {
+                align-self: center;
+                background: rgba(25, 13, 18, 0.9);
+                border: 1px solid #351119;
+                color: #b4a9af;
+                font-size: 10.5px;
+                font-weight: 700;
+                padding: 3px 10px;
+                border-radius: 999px;
+                margin: 6px 0;
+            }
+            .tgv-bubble {
+                max-width: 82%;
+                padding: 8px 11px;
+                border-radius: 15px;
+                font-size: 13px;
+                line-height: 1.38;
+                word-break: break-word;
+                position: relative;
+            }
+            .tgv-bubble.in {
+                align-self: flex-start;
+                background: #160d12;
+                border: 1px solid #2e1119;
+                color: #f3f4f6;
+                border-bottom-left-radius: 4px;
+            }
+            .tgv-bubble.out {
+                align-self: flex-end;
+                background: linear-gradient(135deg, rgba(199, 18, 48, 0.34), rgba(255, 30, 66, 0.22));
+                border: 1px solid rgba(255, 30, 66, 0.55);
+                color: #fff;
+                border-bottom-right-radius: 4px;
+            }
+            .tgv-sender {
+                font-size: 11px;
+                font-weight: 700;
+                color: #ff6b81;
+                margin-bottom: 2px;
+            }
+            .tgv-media-tag {
+                display: inline-block;
+                font-size: 11px;
+                font-weight: 700;
+                color: #7dd3fc;
+                background: rgba(56, 189, 248, 0.12);
+                border: 1px solid rgba(56, 189, 248, 0.35);
+                padding: 2px 7px;
+                border-radius: 6px;
+                margin-bottom: 3px;
+            }
+            .tgv-meta {
+                font-size: 10px;
+                color: #9e969b;
+                text-align: right;
+                margin-top: 3px;
+            }
+            .tgv-bubble.out .tgv-meta { color: #ffc2cd; }
+            .tgv-foot {
+                padding: 9px 12px;
+                background: #0e080c;
+                border-top: 1px solid #2b1018;
+                text-align: center;
+                font-size: 11px;
+                color: #9e969b;
+                flex: 0 0 auto;
+            }
+            .tgv-skel {
+                height: 58px;
+                border-radius: 12px;
+                margin-bottom: 8px;
+                background: linear-gradient(90deg, #12090e 25%, #1f1018 50%, #12090e 75%);
+                background-size: 200% 100%;
+                animation: tgvShimmer 1.2s infinite;
+            }
+            @keyframes tgvShimmer {
+                0% { background-position: 200% 0; }
+                100% { background-position: -200% 0; }
+            }
+            .tgv-empty {
+                text-align: center;
+                color: #9e969b;
+                font-size: 12px;
+                padding: 28px 14px;
+            }
+        </style>
+
+        <div id="tgv-mask" class="tgv-mask" onclick="if(event.target===this) closeTgViewer()">
+            <div id="tgv-sheet" class="tgv-sheet">
+                <div class="tgv-head">
+                    <div class="tgv-head-left">
+                        <button type="button" id="tgv-back-btn" class="tgv-icon-btn" style="display:none;" onclick="tgvBackToDialogs()">‹</button>
+                        <div class="tgv-title-wrap">
+                            <div id="tgv-head-title" class="tgv-title">Telegram</div>
+                            <div id="tgv-head-sub" class="tgv-sub">Загрузка...</div>
+                        </div>
+                    </div>
+                    <div style="display:flex; gap:6px;">
+                        <button type="button" class="tgv-icon-btn" title="Обновить" onclick="tgvRefreshCurrent()">↻</button>
+                        <button type="button" class="tgv-icon-btn" title="Закрыть" onclick="closeTgViewer()">✕</button>
+                    </div>
+                </div>
+
+                <div class="tgv-screens">
+                    <div class="tgv-view tgv-view-dialogs">
+                        <div class="tgv-search-wrap">
+                            <input type="text" id="tgv-search-inp" class="tgv-search" placeholder="Поиск по чатам и контактам..." oninput="tgvRenderDialogs()">
+                        </div>
+                        <div class="tgv-tabs">
+                            <button type="button" class="tgv-tab active" data-filter="all" onclick="tgvSetFilter('all')">Все</button>
+                            <button type="button" class="tgv-tab" data-filter="private" onclick="tgvSetFilter('private')">Личные</button>
+                            <button type="button" class="tgv-tab" data-filter="group" onclick="tgvSetFilter('group')">Группы / Каналы</button>
+                        </div>
+                        <div id="tgv-dialogs-list" class="tgv-list"></div>
+                    </div>
+
+                    <div class="tgv-view tgv-view-chat">
+                        <div id="tgv-msgs-list" class="tgv-msgs"></div>
+                        <div class="tgv-foot">🔒 Безопасный режим просмотра (только чтение)</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <script>
+            const TGV_API_PREFIX = "/api/tg-viewer";
+            let tgvState = {
+                accId: null,
+                phone: "",
+                dialogs: [],
+                filter: "all",
+                activePeerId: null,
+                activePeerTitle: ""
+            };
+
+            const TGV_COLORS = [
+                "linear-gradient(135deg, #e11d48, #9f1239)",
+                "linear-gradient(135deg, #7c3aed, #4c1d95)",
+                "linear-gradient(135deg, #0284c7, #075985)",
+                "linear-gradient(135deg, #059669, #065f46)",
+                "linear-gradient(135deg, #d97706, #92400e)",
+                "linear-gradient(135deg, #db2777, #831843)"
+            ];
+
+            function tgvAvatarColor(id) {
+                const n = Math.abs(Number(id) || 0);
+                return TGV_COLORS[n % TGV_COLORS.length];
+            }
+
+            function tgvInitials(title) {
+                const parts = String(title || "?").trim().split(/\s+/);
+                if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
+                return String(title || "?").slice(0, 2).toUpperCase();
+            }
+
+            function tgvEsc(str) {
+                return String(str || "")
+                    .replace(/&/g, "&amp;")
+                    .replace(/</g, "&lt;")
+                    .replace(/>/g, "&gt;")
+                    .replace(/"/g, "&quot;");
+            }
+
+            function openTgViewer(accId, phoneLabel) {
+                if (!accId) return;
+                tgvState.accId = accId;
+                tgvState.phone = phoneLabel || ("Аккаунт #" + accId);
+                tgvState.dialogs = [];
+                tgvState.activePeerId = null;
+                document.getElementById("tgv-search-inp").value = "";
+                document.getElementById("tgv-sheet").classList.remove("in-chat");
+                document.getElementById("tgv-back-btn").style.display = "none";
+                document.getElementById("tgv-head-title").textContent = tgvState.phone;
+                document.getElementById("tgv-head-sub").textContent = "Подключение к сессии...";
+                document.getElementById("tgv-mask").classList.add("open");
+                tgvLoadDialogs(false);
+            }
+
+            function closeTgViewer() {
+                document.getElementById("tgv-mask").classList.remove("open");
+            }
+
+            function tgvBackToDialogs() {
+                tgvState.activePeerId = null;
+                document.getElementById("tgv-sheet").classList.remove("in-chat");
+                document.getElementById("tgv-back-btn").style.display = "none";
+                document.getElementById("tgv-head-title").textContent = tgvState.phone;
+                document.getElementById("tgv-head-sub").textContent = `Диалогов: ${tgvState.dialogs.length}`;
+            }
+
+            function tgvSetFilter(f) {
+                tgvState.filter = f;
+                document.querySelectorAll(".tgv-tab").forEach(btn => {
+                    btn.classList.toggle("active", btn.dataset.filter === f);
+                });
+                tgvRenderDialogs();
+            }
+
+            function tgvRefreshCurrent() {
+                if (tgvState.activePeerId !== null) {
+                    tgvOpenChat(tgvState.activePeerId, tgvState.activePeerTitle, true);
+                } else {
+                    tgvLoadDialogs(true);
+                }
+            }
+
+            async function tgvLoadDialogs(forceRefresh) {
+                const box = document.getElementById("tgv-dialogs-list");
+                box.innerHTML = '<div class="tgv-skel"></div>'.repeat(6);
+                try {
+                    const q = forceRefresh ? "?refresh=1" : "";
+                    const res = await fetch(`${TGV_API_PREFIX}/${tgvState.accId}/dialogs${q}`);
+                    const data = await res.json();
+                    if (!res.ok || data.error) {
+                        box.innerHTML = `<div class="tgv-empty">⚠️ ${tgvEsc(data.error || "Не удалось загрузить диалоги")}</div>`;
+                        document.getElementById("tgv-head-sub").textContent = "Ошибка доступа";
+                        return;
+                    }
+                    tgvState.dialogs = Array.isArray(data.dialogs) ? data.dialogs : [];
+                    if (data.account_title) {
+                        tgvState.phone = data.account_title;
+                        if (tgvState.activePeerId === null) {
+                            document.getElementById("tgv-head-title").textContent = tgvState.phone;
+                        }
+                    }
+                    document.getElementById("tgv-head-sub").textContent = `Диалогов загружено: ${tgvState.dialogs.length}`;
+                    tgvRenderDialogs();
+                } catch (e) {
+                    box.innerHTML = `<div class="tgv-empty">⚠️ Ошибка сети при загрузке чатов</div>`;
+                }
+            }
+
+            function tgvRenderDialogs() {
+                const box = document.getElementById("tgv-dialogs-list");
+                const q = (document.getElementById("tgv-search-inp").value || "").trim().toLowerCase();
+                const filtered = tgvState.dialogs.filter(d => {
+                    if (tgvState.filter === "private" && d.chat_type !== "private") return false;
+                    if (tgvState.filter === "group" && d.chat_type === "private") return false;
+                    if (q) {
+                        const hay = ((d.title || "") + " " + (d.username || "") + " " + (d.last_message || "")).toLowerCase();
+                        if (!hay.includes(q)) return false;
+                    }
+                    return true;
+                });
+
+                if (!filtered.length) {
+                    box.innerHTML = '<div class="tgv-empty">Чаты не найдены</div>';
+                    return;
+                }
+
+                box.innerHTML = filtered.map(d => {
+                    const unreadHtml = d.unread_count > 0 ? `<span class="tgv-unread">${d.unread_count}</span>` : "";
+                    const prefix = d.chat_type === "channel" ? "📢 " : (d.chat_type === "group" ? "👥 " : "");
+                    const safeTitle = tgvEsc(d.title).replace(/'/g, "\'");
+                    return `
+                        <div class="tgv-dialog" onclick="tgvOpenChat(${d.peer_id}, '${safeTitle}', false)">
+                            <div class="tgv-ava" style="background:${tgvAvatarColor(d.peer_id)}">${tgvEsc(tgvInitials(d.title))}</div>
+                            <div class="tgv-d-mid">
+                                <div class="tgv-d-top">
+                                    <div class="tgv-d-name">${prefix}${tgvEsc(d.title)}</div>
+                                    <div class="tgv-d-time">${tgvEsc(d.time_str || "")}</div>
+                                </div>
+                                <div class="tgv-d-bot">
+                                    <div class="tgv-d-prev">${tgvEsc(d.last_message || "Нет сообщений")}</div>
+                                    ${unreadHtml}
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                }).join("");
+            }
+
+            async function tgvOpenChat(peerId, peerTitle, forceRefresh) {
+                tgvState.activePeerId = peerId;
+                tgvState.activePeerTitle = peerTitle || "Чат";
+                document.getElementById("tgv-sheet").classList.add("in-chat");
+                document.getElementById("tgv-back-btn").style.display = "inline-flex";
+                document.getElementById("tgv-head-title").textContent = tgvState.activePeerTitle;
+                document.getElementById("tgv-head-sub").textContent = "Загрузка сообщений...";
+
+                const box = document.getElementById("tgv-msgs-list");
+                box.innerHTML = '<div class="tgv-skel"></div>'.repeat(5);
+
+                try {
+                    const q = forceRefresh ? "?refresh=1" : "";
+                    const res = await fetch(`${TGV_API_PREFIX}/${tgvState.accId}/messages/${peerId}${q}`);
+                    const data = await res.json();
+                    if (!res.ok || data.error) {
+                        box.innerHTML = `<div class="tgv-empty">⚠️ ${tgvEsc(data.error || "Ошибка загрузки сообщений")}</div>`;
+                        document.getElementById("tgv-head-sub").textContent = "Ошибка";
+                        return;
+                    }
+                    document.getElementById("tgv-head-sub").textContent = data.subtitle || "История переписки";
+                    const msgs = Array.isArray(data.messages) ? data.messages : [];
+                    if (!msgs.length) {
+                        box.innerHTML = '<div class="tgv-empty">В этом чате пока нет сообщений</div>';
+                        return;
+                    }
+
+                    let lastDate = "";
+                    const htmlParts = [];
+                    msgs.forEach(m => {
+                        if (m.date_label && m.date_label !== lastDate) {
+                            lastDate = m.date_label;
+                            htmlParts.push(`<div class="tgv-date-pill">${tgvEsc(lastDate)}</div>`);
+                        }
+                        const side = m.out ? "out" : "in";
+                        const senderHtml = (!m.out && m.sender_name) ? `<div class="tgv-sender">${tgvEsc(m.sender_name)}</div>` : "";
+                        const mediaHtml = m.media_label ? `<div class="tgv-media-tag">${tgvEsc(m.media_label)}</div>` : "";
+                        const textHtml = m.text ? `<div>${tgvEsc(m.text).replace(/\n/g, "<br>")}</div>` : "";
+                        htmlParts.push(`
+                            <div class="tgv-bubble ${side}">
+                                ${senderHtml}
+                                ${mediaHtml}
+                                ${textHtml}
+                                <div class="tgv-meta">${tgvEsc(m.time_str || "")}</div>
+                            </div>
+                        `);
+                    });
+                    box.innerHTML = htmlParts.join("");
+                    box.scrollTop = box.scrollHeight;
+                } catch (e) {
+                    box.innerHTML = `<div class="tgv-empty">⚠️ Ошибка сети при загрузке сообщений</div>`;
+                }
+            }
+        </script>
 </body>
 </html>
