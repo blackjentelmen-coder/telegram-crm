@@ -13,7 +13,7 @@ from fastapi import FastAPI, Form, Request, Response, UploadFile, File, WebSocke
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from telethon import TelegramClient
-from telethon.sessions import StringSession
+from telethon.sessions import дStringSession
 from telethon.errors import (
     AuthKeyUnregisteredError,
     AuthKeyDuplicatedError,
@@ -2802,6 +2802,7 @@ async def client_tg_viewer_messages(request: Request, acc_id: int, peer_id: int,
     return JSONResponse(payload, status_code=code)
 
 
+@app.post("/api/tg-viewer/{acc_id}/messages/{peer_id}/send")
 @app.post("/api/tg-viewer/{acc_id}/send/{peer_id}")
 async def client_tg_viewer_send(request: Request, acc_id: int, peer_id: int):
     client_key = get_session_key_from_request(request)
