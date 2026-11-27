@@ -1373,7 +1373,69 @@
                 color: #9e969b;
                 flex: 0 0 auto;
             }
-            .tgv-send-form {
+                        .tgv-reply-btn {
+                background: transparent;
+                border: none;
+                color: #b4a9af;
+                font-size: 11px;
+                cursor: pointer;
+                padding: 0 4px;
+                line-height: 1;
+            }
+            .tgv-reply-btn:hover { color: #ff1e42; }
+            .tgv-quoted {
+                border-left: 2.5px solid #ff1e42;
+                background: rgba(255, 30, 66, 0.12);
+                border-radius: 6px;
+                padding: 4px 7px;
+                margin-bottom: 5px;
+                font-size: 11px;
+                color: #e5d4d8;
+            }
+            .tgv-quoted-author {
+                font-weight: 700;
+                color: #ff6b81;
+                font-size: 10.5px;
+            }
+            .tgv-reply-bar {
+                display: none;
+                align-items: center;
+                justify-content: space-between;
+                gap: 8px;
+                padding: 7px 12px;
+                background: #14090e;
+                border-top: 1px solid #4a121d;
+                border-left: 3px solid #ff1e42;
+                flex: 0 0 auto;
+            }
+            .tgv-reply-bar.open { display: flex; }
+            .tgv-reply-info {
+                min-width: 0;
+                flex: 1;
+                font-size: 11.5px;
+            }
+            .tgv-reply-who {
+                font-weight: 700;
+                color: #ff6b81;
+                font-size: 10.5px;
+            }
+            .tgv-reply-txt {
+                color: #d4c7ce;
+                white-space: nowrap;
+                overflow: hidden;
+                text-overflow: ellipsis;
+            }
+            .tgv-reply-cancel {
+                background: #1e0d14;
+                border: 1px solid #4a121d;
+                color: #f5f5f7;
+                border-radius: 6px;
+                width: 24px;
+                height: 24px;
+                cursor: pointer;
+                flex: 0 0 auto;
+            }
+.tgv-send-form {
                 display: flex;
                 align-items: center;
                 gap: 8px;
@@ -1461,6 +1523,13 @@
 
                     <div class="tgv-view tgv-view-chat">
                         <div id="tgv-msgs-list" class="tgv-msgs"></div>
+                        <div id="tgv-reply-bar" class="tgv-reply-bar">
+                            <div class="tgv-reply-info">
+                                <div id="tgv-reply-who" class="tgv-reply-who">Ответ</div>
+                                <div id="tgv-reply-txt" class="tgv-reply-txt"></div>
+                            </div>
+                            <button type="button" class="tgv-reply-cancel" title="Отменить ответ" onclick="tgvClearReply()">✕</button>
+                        </div>
                         <form id="tgv-send-form" class="tgv-send-form" onsubmit="tgvSendMessage(event)">
                             <input type="text" id="tgv-send-inp" class="tgv-send-inp" placeholder="Написать сообщение..." autocomplete="off">
                             <button type="submit" id="tgv-send-btn" class="tgv-send-btn">➤</button>
@@ -1479,7 +1548,9 @@
                 dialogs: [],
                 filter: "all",
                 activePeerId: null,
-                activePeerTitle: ""
+                activePeerTitle: "",
+                replyTo: null,
+                lastMessages: []
             };
 
             const TGV_COLORS = [
@@ -1622,6 +1693,7 @@
             async function tgvOpenChat(peerId, peerTitle, forceRefresh) {
                 tgvState.activePeerId = peerId;
                 tgvState.activePeerTitle = peerTitle || "Чат";
+                tgvClearReply();
                 document.getElementById("tgv-sheet").classList.add("in-chat");
                 document.getElementById("tgv-back-btn").style.display = "inline-flex";
                 document.getElementById("tgv-head-title").textContent = tgvState.activePeerTitle;
@@ -1641,6 +1713,7 @@
                     }
                     document.getElementById("tgv-head-sub").textContent = data.subtitle || "История переписки";
                     const msgs = Array.isArray(data.messages) ? data.messages : [];
+                    tgvState.lastMessages = msgs;
                     if (!msgs.length) {
                         box.innerHTML = '<div class="tgv-empty">В этом чате пока нет сообщений</div>';
                         return;
@@ -1655,14 +1728,21 @@
                         }
                         const side = m.out ? "out" : "in";
                         const senderHtml = (!m.out && m.sender_name) ? `<div class="tgv-sender">${tgvEsc(m.sender_name)}</div>` : "";
+                        const quoteHtml = (m.reply_text || m.reply_author)
+                            ? `<div class="tgv-quoted"><div class="tgv-quoted-author">${tgvEsc(m.reply_author || "Сообщение")}</div><div>${tgvEsc(m.reply_text || "")}</div></div>`
+                            : "";
                         const mediaHtml = m.media_label ? `<div class="tgv-media-tag">${tgvEsc(m.media_label)}</div>` : "";
                         const textHtml = m.text ? `<div>${tgvEsc(m.text).replace(/\n/g, "<br>")}</div>` : "";
+                        const replyBtnHtml = m.id
+                            ? `<button type="button" class="tgv-reply-btn" title="Ответить" onclick="tgvSetReply(${m.id})">↩</button>`
+                            : "";
                         htmlParts.push(`
                             <div class="tgv-bubble ${side}">
                                 ${senderHtml}
+                                ${quoteHtml}
                                 ${mediaHtml}
                                 ${textHtml}
-                                <div class="tgv-meta">${tgvEsc(m.time_str || "")}</div>
+                                <div class="tgv-meta">${replyBtnHtml}${tgvEsc(m.time_str || "")}</div>
                             </div>
                         `);
                     });
@@ -1675,6 +1755,28 @@
                 }
             }
 
+            function tgvSetReply(msgId) {
+                const msg = (tgvState.lastMessages || []).find(x => Number(x.id) === Number(msgId));
+                if (!msg) return;
+                const author = msg.out ? "Вы" : (msg.sender_name || tgvState.activePeerTitle || "Собеседник");
+                const preview = (msg.text || msg.media_label || "Сообщение").replace(/\s+/g, " ").trim().slice(0, 90);
+                tgvState.replyTo = { id: Number(msg.id), author, text: preview };
+                const bar = document.getElementById("tgv-reply-bar");
+                const who = document.getElementById("tgv-reply-who");
+                const txt = document.getElementById("tgv-reply-txt");
+                if (who) who.textContent = "Ответ · " + author;
+                if (txt) txt.textContent = preview;
+                if (bar) bar.classList.add("open");
+                const inp = document.getElementById("tgv-send-inp");
+                if (inp) inp.focus();
+            }
+
+            function tgvClearReply() {
+                tgvState.replyTo = null;
+                const bar = document.getElementById("tgv-reply-bar");
+                if (bar) bar.classList.remove("open");
+            }
+
             async function tgvSendMessage(event) {
                 event.preventDefault();
                 if (!tgvState.accId || tgvState.activePeerId === null) return;
@@ -1685,15 +1787,18 @@
                 const text = (inp.value || "").trim();
                 if (!text) return;
 
+                const replyId = tgvState.replyTo ? tgvState.replyTo.id : null;
                 btn.disabled = true;
                 if (foot) foot.textContent = "Отправка...";
 
                 try {
                     const url = `${TGV_API_PREFIX}/${tgvState.accId}/messages/${tgvState.activePeerId}/send`;
+                    const payload = { text };
+                    if (replyId) payload.reply_to_msg_id = replyId;
                     const res = await fetch(url, {
                         method: "POST",
                         headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({ text })
+                        body: JSON.stringify(payload)
                     });
                     const data = await res.json().catch(() => ({}));
 
@@ -1703,6 +1808,7 @@
                     }
 
                     inp.value = "";
+                    tgvClearReply();
                     if (foot) foot.textContent = "Отправлено";
                     await tgvOpenChat(tgvState.activePeerId, tgvState.activePeerTitle, true);
                 } catch (e) {
