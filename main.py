@@ -2469,7 +2469,7 @@ def logout_client():
 
 
 # =====================================================================
-# TELEGRAM ACCOUNT VIEWER (READ-ONLY UI FOR CLIENT & ADMIN)
+# TELEGRAM ACCOUNT VIEWER (READ/WRITE UI FOR CLIENT & ADMIN)
 # =====================================================================
 from datetime import datetime as _dt
 
@@ -2484,6 +2484,15 @@ def _get_tg_viewer_lock(acc_id: int) -> asyncio.Lock:
         lock = asyncio.Lock()
         _tg_viewer_locks[acc_id] = lock
     return lock
+
+
+def _invalidate_tg_viewer_cache(acc_id: int, peer_id: int | None = None):
+    _tg_viewer_cache.pop(("dialogs", int(acc_id)), None)
+    if peer_id is not None:
+        _tg_viewer_cache.pop(("messages", int(acc_id), int(peer_id)), None)
+    else:
+        for k in [k for k in _tg_viewer_cache if len(k) >= 2 and k[1] == int(acc_id)]:
+            _tg_viewer_cache.pop(k, None)
 
 
 def _format_tg_media_label(msg) -> str:
@@ -2703,6 +2712,62 @@ async def _fetch_tg_viewer_messages(acc_row: dict, peer_id: int, force_refresh: 
                 pass
 
 
+async def _send_tg_viewer_message(acc_row: dict, peer_id: int, text: str) -> tuple[int, dict]:
+    acc_id = int(acc_row["id"])
+    clean_text = (text or "").strip()
+    if not clean_text:
+        return 400, {"error": "Пустое сообщение"}
+    if len(clean_text) > 4096:
+        return 400, {"error": "Сообщение слишком длинное (максимум 4096 символов)"}
+
+    session_str = decrypt_secret(acc_row.get("session_string") or "")
+    if not session_str:
+        return 400, {"error": "Сессия аккаунта пуста или не авторизована"}
+
+    lock = _get_tg_viewer_lock(acc_id)
+    async with lock:
+        proxy_cfg = get_account_proxy_tuple(acc_row)
+        client = TelegramClient(StringSession(session_str), API_ID, API_HASH, proxy=proxy_cfg)
+        try:
+            await client.connect()
+            if not await client.is_user_authorized():
+                set_tg_account_status(acc_id, ACCOUNT_STATUS_SESSION_LOST, "Сессия не авторизована")
+                return 401, {"error": "Сессия аккаунта слетела или не авторизована"}
+
+            entity = await client.get_entity(int(peer_id))
+            sent_msg = await client.send_message(entity, clean_text)
+            _invalidate_tg_viewer_cache(acc_id, int(peer_id))
+
+            t_str, d_lbl = _format_tg_timestamp(getattr(sent_msg, "date", None))
+            if not t_str:
+                t_str = _dt.now().strftime("%H:%M")
+            if not d_lbl:
+                d_lbl = "Сегодня"
+
+            return 200, {
+                "ok": True,
+                "message": {
+                    "id": int(getattr(sent_msg, "id", 0) or 0),
+                    "out": True,
+                    "sender_name": "",
+                    "text": clean_text,
+                    "media_label": "",
+                    "time_str": t_str,
+                    "date_label": d_lbl,
+                },
+            }
+        except Exception as e:
+            mapped_status, reason = classify_tg_error(e)
+            if mapped_status:
+                set_tg_account_status(acc_id, mapped_status, reason)
+            return 502, {"error": f"Ошибка отправки: {reason}"}
+        finally:
+            try:
+                await client.disconnect()
+            except Exception:
+                pass
+
+
 @app.get("/api/tg-viewer/{acc_id}/dialogs")
 async def client_tg_viewer_dialogs(request: Request, acc_id: int, refresh: int = 0):
     client_key = get_session_key_from_request(request)
@@ -2737,6 +2802,28 @@ async def client_tg_viewer_messages(request: Request, acc_id: int, peer_id: int,
     return JSONResponse(payload, status_code=code)
 
 
+@app.post("/api/tg-viewer/{acc_id}/send/{peer_id}")
+async def client_tg_viewer_send(request: Request, acc_id: int, peer_id: int):
+    client_key = get_session_key_from_request(request)
+    if not get_authorized_client(client_key):
+        return JSONResponse({"error": "Не авторизован"}, status_code=401)
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    text = str(body.get("text") or "")
+    db = get_db()
+    row = db.execute(
+        "SELECT * FROM client_tg_accounts WHERE id = ? AND client_key = ?",
+        (acc_id, client_key),
+    ).fetchone()
+    db.close()
+    if not row:
+        return JSONResponse({"error": "Аккаунт не найден"}, status_code=404)
+    code, payload = await _send_tg_viewer_message(dict(row), peer_id, text)
+    return JSONResponse(payload, status_code=code)
+
+
 @app.get(f"{SECRET_PATH}/tg-viewer/{{acc_id}}/dialogs")
 async def admin_tg_viewer_dialogs(request: Request, acc_id: int, refresh: int = 0):
     if not is_admin_authenticated(request):
@@ -2760,4 +2847,22 @@ async def admin_tg_viewer_messages(request: Request, acc_id: int, peer_id: int, 
     if not row:
         return JSONResponse({"error": "Аккаунт не найден"}, status_code=404)
     code, payload = await _fetch_tg_viewer_messages(dict(row), peer_id, force_refresh=bool(refresh))
+    return JSONResponse(payload, status_code=code)
+
+
+@app.post(f"{SECRET_PATH}/tg-viewer/{{acc_id}}/send/{{peer_id}}")
+async def admin_tg_viewer_send(request: Request, acc_id: int, peer_id: int):
+    if not is_admin_authenticated(request):
+        return JSONResponse({"error": "Требуется доступ администратора"}, status_code=403)
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    text = str(body.get("text") or "")
+    db = get_db()
+    row = db.execute("SELECT * FROM client_tg_accounts WHERE id = ?", (acc_id,)).fetchone()
+    db.close()
+    if not row:
+        return JSONResponse({"error": "Аккаунт не найден"}, status_code=404)
+    code, payload = await _send_tg_viewer_message(dict(row), peer_id, text)
     return JSONResponse(payload, status_code=code)
