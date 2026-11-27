@@ -1373,6 +1373,43 @@
                 color: #9e969b;
                 flex: 0 0 auto;
             }
+            .tgv-send-form {
+                display: flex;
+                align-items: center;
+                gap: 8px;
+                padding: 8px 10px;
+                background: #0e080c;
+                border-top: 1px solid #2b1018;
+                flex: 0 0 auto;
+            }
+            .tgv-send-inp {
+                flex: 1;
+                min-width: 0;
+                padding: 9px 12px;
+                border-radius: 10px;
+                background: #150c11;
+                border: 1px solid #351119;
+                color: #f5f5f7;
+                font-size: 13px;
+                outline: none;
+            }
+            .tgv-send-inp:focus { border-color: #ff1e42; }
+            .tgv-send-btn {
+                width: 38px;
+                height: 38px;
+                border-radius: 10px;
+                border: none;
+                background: linear-gradient(135deg, #c71230, #ff1e42);
+                color: #fff;
+                font-size: 15px;
+                font-weight: 800;
+                cursor: pointer;
+                flex: 0 0 auto;
+            }
+            .tgv-send-btn:disabled {
+                opacity: 0.5;
+                cursor: not-allowed;
+            }
             .tgv-skel {
                 height: 58px;
                 border-radius: 12px;
@@ -1424,7 +1461,11 @@
 
                     <div class="tgv-view tgv-view-chat">
                         <div id="tgv-msgs-list" class="tgv-msgs"></div>
-                        <div class="tgv-foot">🔒 Безопасный режим просмотра (только чтение)</div>
+                        <form id="tgv-send-form" class="tgv-send-form" onsubmit="tgvSendMessage(event)">
+                            <input type="text" id="tgv-send-inp" class="tgv-send-inp" placeholder="Написать сообщение..." autocomplete="off">
+                            <button type="submit" id="tgv-send-btn" class="tgv-send-btn">➤</button>
+                        </form>
+                        <div id="tgv-foot-status" class="tgv-foot">Активный режим чата</div>
                     </div>
                 </div>
             </div>
@@ -1627,8 +1668,47 @@
                     });
                     box.innerHTML = htmlParts.join("");
                     box.scrollTop = box.scrollHeight;
+                    const foot = document.getElementById("tgv-foot-status");
+                    if (foot) foot.textContent = "Активный режим чата";
                 } catch (e) {
                     box.innerHTML = `<div class="tgv-empty">⚠️ Ошибка сети при загрузке сообщений</div>`;
+                }
+            }
+
+            async function tgvSendMessage(event) {
+                event.preventDefault();
+                if (!tgvState.accId || tgvState.activePeerId === null) return;
+
+                const inp = document.getElementById("tgv-send-inp");
+                const btn = document.getElementById("tgv-send-btn");
+                const foot = document.getElementById("tgv-foot-status");
+                const text = (inp.value || "").trim();
+                if (!text) return;
+
+                btn.disabled = true;
+                if (foot) foot.textContent = "Отправка...";
+
+                try {
+                    const url = `${TGV_API_PREFIX}/${tgvState.accId}/messages/${tgvState.activePeerId}/send`;
+                    const res = await fetch(url, {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ text })
+                    });
+                    const data = await res.json().catch(() => ({}));
+
+                    if (!res.ok || data.error) {
+                        if (foot) foot.textContent = "Ошибка: " + (data.error || res.status);
+                        return;
+                    }
+
+                    inp.value = "";
+                    if (foot) foot.textContent = "Отправлено";
+                    await tgvOpenChat(tgvState.activePeerId, tgvState.activePeerTitle, true);
+                } catch (e) {
+                    if (foot) foot.textContent = "Ошибка сети при отправке";
+                } finally {
+                    btn.disabled = false;
                 }
             }
         </script>
