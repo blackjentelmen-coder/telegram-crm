@@ -1576,13 +1576,52 @@ def admin_dashboard(request: Request, message: str = "", q: str = ""):
                 margin-top: 3px;
             }}
             .tgv-bubble.out .tgv-meta {{ color: #ffc2cd; }}
-            .tgv-foot {{
-                padding: 9px 12px;
+            .tgv-send-form {{
+                display: flex;
+                align-items: center;
+                gap: 8px;
+                padding: 9px 10px;
                 background: #0e080c;
                 border-top: 1px solid #2b1018;
-                text-align: center;
+                flex: 0 0 auto;
+            }}
+            .tgv-send-inp {{
+                flex: 1;
+                padding: 9px 12px;
+                border-radius: 10px;
+                background: #160c11;
+                border: 1px solid #4a121d;
+                color: #f5f5f7;
+                font-size: 13px;
+                outline: none;
+            }}
+            .tgv-send-inp:focus {{
+                border-color: #ff1e42;
+                box-shadow: 0 0 8px rgba(255, 30, 66, 0.25);
+            }}
+            .tgv-send-btn {{
+                width: 40px;
+                height: 36px;
+                border-radius: 10px;
+                border: none;
+                background: linear-gradient(135deg, #c71230, #ff1e42);
+                color: #fff;
+                font-size: 14px;
+                font-weight: 700;
+                cursor: pointer;
+                flex: 0 0 auto;
+                box-shadow: 0 0 10px rgba(255, 30, 66, 0.3);
+            }}
+            .tgv-send-btn:disabled {{
+                opacity: 0.5;
+                cursor: not-allowed;
+            }}
+            .tgv-send-err {{
+                padding: 6px 12px;
+                background: rgba(255, 30, 66, 0.16);
+                border-top: 1px solid rgba(255, 30, 66, 0.45);
+                color: #ffb3c1;
                 font-size: 11px;
-                color: #9e969b;
                 flex: 0 0 auto;
             }}
             .tgv-skel {{
@@ -1636,7 +1675,11 @@ def admin_dashboard(request: Request, message: str = "", q: str = ""):
 
                     <div class="tgv-view tgv-view-chat">
                         <div id="tgv-msgs-list" class="tgv-msgs"></div>
-                        <div class="tgv-foot">🔒 Безопасный режим просмотра (только чтение)</div>
+                        <div id="tgv-send-err" class="tgv-send-err" style="display:none;"></div>
+                        <form id="tgv-send-form" class="tgv-send-form" onsubmit="tgvSendMessage(event)">
+                            <input type="text" id="tgv-send-inp" class="tgv-send-inp" placeholder="Написать сообщение..." autocomplete="off">
+                            <button type="submit" id="tgv-send-btn" class="tgv-send-btn" aria-label="Отправить">➤</button>
+                        </form>
                     </div>
                 </div>
             </div>
@@ -1650,7 +1693,8 @@ def admin_dashboard(request: Request, message: str = "", q: str = ""):
                 dialogs: [],
                 filter: "all",
                 activePeerId: null,
-                activePeerTitle: ""
+                activePeerTitle: "",
+                sending: false
             }};
 
             const TGV_COLORS = [
@@ -1681,12 +1725,48 @@ def admin_dashboard(request: Request, message: str = "", q: str = ""):
                     .replace(/"/g, "&quot;");
             }}
 
+            function tgvShowSendError(msg) {{
+                const el = document.getElementById("tgv-send-err");
+                if (!el) return;
+                el.textContent = msg || "";
+                el.style.display = msg ? "block" : "none";
+            }}
+
+            function tgvAppendBubble(m) {{
+                const box = document.getElementById("tgv-msgs-list");
+                if (!box || !m) return;
+                const emptyEl = box.querySelector(".tgv-empty");
+                if (emptyEl) emptyEl.remove();
+
+                if (m.date_label) {{
+                    const pills = box.querySelectorAll(".tgv-date-pill");
+                    const lastPill = pills.length ? pills[pills.length - 1].textContent.trim() : "";
+                    if (lastPill !== m.date_label) {{
+                        const pill = document.createElement("div");
+                        pill.className = "tgv-date-pill";
+                        pill.textContent = m.date_label;
+                        box.appendChild(pill);
+                    }}
+                }}
+
+                const side = m.out ? "out" : "in";
+                const senderHtml = (!m.out && m.sender_name) ? `<div class="tgv-sender">${{tgvEsc(m.sender_name)}}</div>` : "";
+                const mediaHtml = m.media_label ? `<div class="tgv-media-tag">${{tgvEsc(m.media_label)}}</div>` : "";
+                const textHtml = m.text ? `<div>${{tgvEsc(m.text).replace(/\n/g, "<br>")}}</div>` : "";
+                const wrap = document.createElement("div");
+                wrap.className = `tgv-bubble ${{side}}`;
+                wrap.innerHTML = `${{senderHtml}}${{mediaHtml}}${{textHtml}}<div class="tgv-meta">${{tgvEsc(m.time_str || "")}}</div>`;
+                box.appendChild(wrap);
+                box.scrollTop = box.scrollHeight;
+            }}
+
             function openTgViewer(accId, phoneLabel) {{
                 if (!accId) return;
                 tgvState.accId = accId;
                 tgvState.phone = phoneLabel || ("Аккаунт #" + accId);
                 tgvState.dialogs = [];
                 tgvState.activePeerId = null;
+                tgvShowSendError("");
                 document.getElementById("tgv-search-inp").value = "";
                 document.getElementById("tgv-sheet").classList.remove("in-chat");
                 document.getElementById("tgv-back-btn").style.display = "none";
@@ -1702,6 +1782,7 @@ def admin_dashboard(request: Request, message: str = "", q: str = ""):
 
             function tgvBackToDialogs() {{
                 tgvState.activePeerId = null;
+                tgvShowSendError("");
                 document.getElementById("tgv-sheet").classList.remove("in-chat");
                 document.getElementById("tgv-back-btn").style.display = "none";
                 document.getElementById("tgv-head-title").textContent = tgvState.phone;
@@ -1771,7 +1852,7 @@ def admin_dashboard(request: Request, message: str = "", q: str = ""):
                 box.innerHTML = filtered.map(d => {{
                     const unreadHtml = d.unread_count > 0 ? `<span class="tgv-unread">${{d.unread_count}}</span>` : "";
                     const prefix = d.chat_type === "channel" ? "📢 " : (d.chat_type === "group" ? "👥 " : "");
-                    const safeTitle = tgvEsc(d.title).replace(/'/g, "\'");
+                    const safeTitle = tgvEsc(d.title).replace(/'/g, "\\'");
                     return `
                         <div class="tgv-dialog" onclick="tgvOpenChat(${{d.peer_id}}, '${{safeTitle}}', false)">
                             <div class="tgv-ava" style="background:${{tgvAvatarColor(d.peer_id)}}">${{tgvEsc(tgvInitials(d.title))}}</div>
@@ -1793,6 +1874,7 @@ def admin_dashboard(request: Request, message: str = "", q: str = ""):
             async function tgvOpenChat(peerId, peerTitle, forceRefresh) {{
                 tgvState.activePeerId = peerId;
                 tgvState.activePeerTitle = peerTitle || "Чат";
+                tgvShowSendError("");
                 document.getElementById("tgv-sheet").classList.add("in-chat");
                 document.getElementById("tgv-back-btn").style.display = "inline-flex";
                 document.getElementById("tgv-head-title").textContent = tgvState.activePeerTitle;
@@ -1841,6 +1923,41 @@ def admin_dashboard(request: Request, message: str = "", q: str = ""):
                     box.scrollTop = box.scrollHeight;
                 }} catch (e) {{
                     box.innerHTML = `<div class="tgv-empty">⚠️ Ошибка сети при загрузке сообщений</div>`;
+                }}
+            }}
+
+            async function tgvSendMessage(ev) {{
+                if (ev) ev.preventDefault();
+                if (tgvState.sending || tgvState.accId === null || tgvState.activePeerId === null) return;
+
+                const inp = document.getElementById("tgv-send-inp");
+                const btn = document.getElementById("tgv-send-btn");
+                const text = (inp.value || "").trim();
+                if (!text) return;
+
+                tgvShowSendError("");
+                tgvState.sending = true;
+                btn.disabled = true;
+
+                try {{
+                    const res = await fetch(`${{TGV_API_PREFIX}}/${{tgvState.accId}}/send/${{tgvState.activePeerId}}`, {{
+                        method: "POST",
+                        headers: {{ "Content-Type": "application/json" }},
+                        body: JSON.stringify({{ text }})
+                    }});
+                    const data = await res.json();
+                    if (!res.ok || data.error || !data.ok) {{
+                        tgvShowSendError("⚠️ " + (data.error || "Не удалось отправить сообщение"));
+                        return;
+                    }}
+                    inp.value = "";
+                    tgvAppendBubble(data.message);
+                }} catch (e) {{
+                    tgvShowSendError("⚠️ Ошибка сети при отправке сообщения");
+                }} finally {{
+                    tgvState.sending = false;
+                    btn.disabled = false;
+                    inp.focus();
                 }}
             }}
         </script>
