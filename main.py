@@ -13,7 +13,7 @@ from fastapi import FastAPI, Form, Request, Response, UploadFile, File, WebSocke
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from telethon import TelegramClient
-from telethon.sessions import дStringSession
+from telethon.sessions import StringSession
 from telethon.errors import (
     AuthKeyUnregisteredError,
     AuthKeyDuplicatedError,
@@ -2673,23 +2673,41 @@ async def _fetch_tg_viewer_messages(acc_row: dict, peer_id: int, force_refresh: 
             subtitle = f"@{uname}" if uname else "История переписки (последние 45)"
 
             raw_msgs = await client.get_messages(entity, limit=45)
+            by_id = {int(x.id): x for x in raw_msgs if getattr(x, "id", None) is not None}
             msgs_out = []
-            for m in reversed(raw_msgs):
-                if getattr(m, "action", None) and not getattr(m, "message", None):
+            for msg in reversed(raw_msgs):
+                if getattr(msg, "action", None) and not getattr(msg, "message", None):
                     continue
-                t_str, d_lbl = _format_tg_timestamp(getattr(m, "date", None))
+                t_str, d_lbl = _format_tg_timestamp(getattr(msg, "date", None))
                 sender_name = ""
-                if not getattr(m, "out", False) and getattr(m, "sender", None):
-                    s = m.sender
+                if not getattr(msg, "out", False) and getattr(msg, "sender", None):
+                    s = msg.sender
                     sender_name = " ".join(
                         x for x in [getattr(s, "first_name", ""), getattr(s, "last_name", "")] if x
                     ).strip() or getattr(s, "title", "") or ""
+                reply_author = ""
+                reply_text = ""
+                rep_hdr = getattr(msg, "reply_to", None)
+                rep_id = getattr(rep_hdr, "reply_to_msg_id", None) if rep_hdr else None
+                if rep_id:
+                    orig = by_id.get(int(rep_id))
+                    if orig:
+                        if getattr(orig, "out", False):
+                            reply_author = "Вы"
+                        elif getattr(orig, "sender", None):
+                            os_obj = orig.sender
+                            reply_author = " ".join(
+                                x for x in [getattr(os_obj, "first_name", ""), getattr(os_obj, "last_name", "")] if x
+                            ).strip() or getattr(os_obj, "title", "") or ""
+                        reply_text = ((getattr(orig, "message", "") or "").strip() or _format_tg_media_label(orig))[:90]
                 msgs_out.append({
-                    "id": int(m.id),
-                    "out": bool(getattr(m, "out", False)),
+                    "id": int(msg.id),
+                    "out": bool(getattr(msg, "out", False)),
                     "sender_name": sender_name,
-                    "text": (getattr(m, "message", "") or ""),
-                    "media_label": _format_tg_media_label(m),
+                    "text": (getattr(msg, "message", "") or ""),
+                    "media_label": _format_tg_media_label(msg),
+                    "reply_author": reply_author,
+                    "reply_text": reply_text,
                     "time_str": t_str,
                     "date_label": d_lbl,
                 })
@@ -2712,7 +2730,7 @@ async def _fetch_tg_viewer_messages(acc_row: dict, peer_id: int, force_refresh: 
                 pass
 
 
-async def _send_tg_viewer_message(acc_row: dict, peer_id: int, text: str) -> tuple[int, dict]:
+async def _send_tg_viewer_message(acc_row: dict, peer_id: int, text: str, reply_to_msg_id: int | None = None) -> tuple[int, dict]:
     acc_id = int(acc_row["id"])
     clean_text = (text or "").strip()
     if not clean_text:
@@ -2735,7 +2753,10 @@ async def _send_tg_viewer_message(acc_row: dict, peer_id: int, text: str) -> tup
                 return 401, {"error": "Сессия аккаунта слетела или не авторизована"}
 
             entity = await client.get_entity(int(peer_id))
-            sent_msg = await client.send_message(entity, clean_text)
+            if reply_to_msg_id:
+                sent_msg = await client.send_message(entity, clean_text, reply_to=int(reply_to_msg_id))
+            else:
+                sent_msg = await client.send_message(entity, clean_text)
             _invalidate_tg_viewer_cache(acc_id, int(peer_id))
 
             t_str, d_lbl = _format_tg_timestamp(getattr(sent_msg, "date", None))
@@ -2813,6 +2834,8 @@ async def client_tg_viewer_send(request: Request, acc_id: int, peer_id: int):
     except Exception:
         body = {}
     text = str(body.get("text") or "")
+    raw_rep = body.get("reply_to_msg_id")
+    reply_id = int(raw_rep) if str(raw_rep or "").strip().isdigit() else None
     db = get_db()
     row = db.execute(
         "SELECT * FROM client_tg_accounts WHERE id = ? AND client_key = ?",
@@ -2821,7 +2844,7 @@ async def client_tg_viewer_send(request: Request, acc_id: int, peer_id: int):
     db.close()
     if not row:
         return JSONResponse({"error": "Аккаунт не найден"}, status_code=404)
-    code, payload = await _send_tg_viewer_message(dict(row), peer_id, text)
+    code, payload = await _send_tg_viewer_message(dict(row), peer_id, text, reply_to_msg_id=reply_id)
     return JSONResponse(payload, status_code=code)
 
 
